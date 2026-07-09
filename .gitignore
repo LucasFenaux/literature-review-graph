@@ -39,3 +39,18 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+
+# Databases
+*.db
+*.sqlite
+*-shm
+*-wal
+
+# Logs
+screenlog.0
+
+# Environment variables (Crucial for API keys)
+.env
+.env.local
+.env.development

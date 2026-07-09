@@ -1,0 +1,475 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useGraphStore } from '@/store/graphStore';
+import { Paper } from '@/lib/openalex';
+import { formatAuthors } from '@/lib/formatters';
+
+export default function Sidebar() {
+  const [loading, setLoading] = useState(false);
+  const [previewPaper, setPreviewPaper] = useState<Paper | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [s2ApiKey, setS2ApiKey] = useState('');
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [s2RateLimit, setS2RateLimit] = useState(1);
+  
+  // Background queue processor
+  useEffect(() => {
+    const processQueue = async () => {
+      try {
+        await fetch('/api/queue', { method: 'POST' });
+      } catch (e) {
+        console.error('Queue processing failed', e);
+      }
+    };
+    
+    // Process queue immediately on load, then every 30 seconds
+    processQueue();
+    const interval = setInterval(processQueue, 30000);
+    return () => clearInterval(interval);
+  }, []);
+  
+  const { 
+    collections, 
+    activeCollectionId, 
+    setActiveCollectionId, 
+    exploreMode, 
+    setExploreMode, 
+    searchQuery,
+    setSearchQuery,
+    searchResults,
+    setSearchResults,
+    createCollection, 
+    addSeedPaper,
+    loadCollectionGraph
+  } = useGraphStore();
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery) return;
+    
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
+      const data = await res.json();
+      setSearchResults(data);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const [queueStatus, setQueueStatus] = useState<{pending: number, failed: number} | null>(null);
+
+  const fetchQueueStatus = async () => {
+    try {
+      const res = await fetch('/api/queue/status');
+      const data = await res.json();
+      setQueueStatus(data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const openSettings = async () => {
+    try {
+      const res = await fetch('/api/settings');
+      const data = await res.json();
+      if (data.semanticScholarApiKey) setS2ApiKey(data.semanticScholarApiKey);
+      if (data.semanticScholarRateLimit) setS2RateLimit(parseInt(data.semanticScholarRateLimit) || 1);
+    } catch (e) {
+      console.error(e);
+    }
+    fetchQueueStatus();
+    setShowSettings(true);
+  };
+
+  const saveSettings = async () => {
+    try {
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          semanticScholarApiKey: s2ApiKey,
+          semanticScholarRateLimit: s2RateLimit.toString()
+        })
+      });
+      setShowSettings(false);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleCreateCollection = async () => {
+    const name = prompt('Enter a name for the new collection:');
+    if (name) {
+      await createCollection(name);
+    }
+  };
+
+  const handleCollectionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const id = e.target.value;
+    setActiveCollectionId(id);
+    if (id) loadCollectionGraph(id);
+  };
+
+  const [isCollapsed, setIsCollapsed] = useState(false);
+
+  return (
+    <div style={{
+      position: 'absolute',
+      left: isCollapsed ? '-340px' : '1rem',
+      top: '1rem',
+      bottom: '1rem',
+      display: 'flex',
+      alignItems: 'center',
+      zIndex: 10,
+      transition: 'left 0.3s ease',
+    }}>
+      <div className="glass-panel" style={{
+        width: '340px',
+        height: '100%',
+        padding: '1.5rem',
+        borderRadius: 'var(--radius-lg)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '1.5rem',
+        overflow: 'hidden'
+      }}>
+      {/* Collections Header */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderBottom: '1px solid var(--border-strong)', paddingBottom: '1rem' }}>
+        <h1 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Collections</h1>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <select 
+            value={activeCollectionId || ''} 
+            onChange={handleCollectionChange}
+            style={{ flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-sm)', background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border-strong)' }}
+          >
+            <option value="" disabled>Select a collection...</option>
+            {collections.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <button 
+            onClick={handleCreateCollection}
+            style={{ padding: '0.5rem', borderRadius: 'var(--radius-sm)', background: 'var(--accent-secondary)', color: 'white', border: 'none', cursor: 'pointer' }}
+          >
+            + New
+          </button>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+            <input 
+              type="checkbox" 
+              id="exploreMode"
+              checked={exploreMode}
+              onChange={(e) => setExploreMode(e.target.checked)}
+            />
+            <label htmlFor="exploreMode">Explore Mode</label>
+          </div>
+          <button 
+            onClick={openSettings}
+            style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem', borderRadius: 'var(--radius-sm)', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+          >
+            Settings
+          </button>
+        </div>
+      </div>
+
+      {/* Search Module */}
+      <div style={{ opacity: activeCollectionId ? 1 : 0.5, pointerEvents: activeCollectionId ? 'auto' : 'none' }}>
+        <h2 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.75rem' }}>Add Papers</h2>
+        <form onSubmit={handleSearch} style={{ display: 'flex', gap: '0.5rem' }}>
+          <input 
+            type="text" 
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              if (!e.target.value) setSearchResults([]);
+            }}
+            placeholder="Search DOI, keyword, or author..." 
+            style={{ flex: 1, padding: '0.5rem 0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', background: 'var(--bg-surface)', color: 'var(--text-primary)', outline: 'none' }}
+          />
+          <button type="submit" disabled={loading} style={{ padding: '0.5rem 1rem', borderRadius: 'var(--radius-md)', background: 'var(--accent-primary)', color: 'white', border: 'none', cursor: 'pointer' }}>
+            {loading ? '...' : 'Search'}
+          </button>
+        </form>
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        {searchResults.map(paper => (
+          <div key={paper.id} 
+            onClick={() => setPreviewPaper(paper)}
+            style={{ padding: '1rem', background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', cursor: 'pointer' }}
+          >
+            <h3 style={{ fontSize: '0.9rem', marginBottom: '0.25rem' }}>{paper.title}</h3>
+            {paper.venue && (
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-primary)', marginBottom: '0.25rem', fontStyle: 'italic' }}>
+                {paper.venue}
+              </p>
+            )}
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+              {paper.year} • {paper.citationCount} citations
+            </p>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button 
+                onClick={(e) => { e.stopPropagation(); setPreviewPaper(paper); }}
+                style={{ flex: 1, padding: '0.4rem', borderRadius: 'var(--radius-sm)', background: 'var(--bg-surface-hover)', color: 'var(--accent-secondary)', border: '1px solid var(--border-strong)', cursor: 'pointer', fontSize: '0.8rem' }}
+              >
+                View Details
+              </button>
+              <button 
+                onClick={(e) => { e.stopPropagation(); addSeedPaper(paper); }}
+                style={{ flex: 1, padding: '0.4rem', borderRadius: 'var(--radius-sm)', background: 'var(--accent-primary)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '0.8rem' }}
+              >
+                Add 
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Preview Modal */}
+      {previewPaper && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 100,
+          backdropFilter: 'blur(4px)'
+        }}>
+          <div className="glass-panel" style={{
+            width: '90%',
+            maxWidth: '600px',
+            maxHeight: '90vh',
+            padding: '2rem',
+            borderRadius: 'var(--radius-lg)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem',
+            position: 'relative'
+          }}>
+            <button 
+              onClick={() => setPreviewPaper(null)}
+              style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', fontSize: '1.5rem', lineHeight: 1 }}
+            >
+              &times;
+            </button>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 600, paddingRight: '2rem' }}>{previewPaper.title}</h2>
+            
+            {previewPaper.venue && (
+              <p style={{ fontSize: '1rem', color: 'var(--accent-primary)', fontWeight: 500 }}>
+                {previewPaper.venue}
+              </p>
+            )}
+            
+            <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+              {formatAuthors(previewPaper.authors)}
+            </p>
+            
+            <p style={{ fontSize: '0.9rem', color: 'var(--text-tertiary)' }}>
+              {previewPaper.year} • {previewPaper.citationCount} citations
+            </p>
+            
+            <div style={{ flex: 1, overflowY: 'auto', marginTop: '1rem', marginBottom: '1rem', paddingRight: '1rem' }}>
+              <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>Abstract</h3>
+              <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                {previewPaper.abstract || 'No abstract available.'}
+              </p>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '1rem', marginTop: 'auto' }}>
+              {previewPaper.url && (
+                <a 
+                  href={previewPaper.url} 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  style={{ flex: 1, padding: '0.75rem', textAlign: 'center', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface-hover)', border: '1px solid var(--border-strong)', color: 'var(--text-primary)', textDecoration: 'none' }}
+                >
+                  View PDF / Source
+                </a>
+              )}
+              <button 
+                onClick={() => {
+                  addSeedPaper(previewPaper);
+                  setPreviewPaper(null);
+                }}
+                style={{ flex: 2, padding: '0.75rem', borderRadius: 'var(--radius-md)', background: 'var(--accent-primary)', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+              >
+                Add to Collection
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 100
+        }} onClick={() => setShowSettings(false)}>
+          <div style={{
+            position: 'relative',
+            background: 'var(--bg-surface)',
+            padding: '2rem',
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--border-strong)',
+            width: '400px',
+            maxWidth: '90vw'
+          }} onClick={e => e.stopPropagation()}>
+            <button 
+              onClick={() => setShowSettings(false)}
+              style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'transparent', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', fontSize: '1.25rem', lineHeight: 1 }}
+            >
+              &times;
+            </button>
+            <h2 style={{ marginBottom: '1rem', fontSize: '1.2rem' }}>Settings</h2>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
+              <label style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Semantic Scholar API Key</label>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <input 
+                  type={showApiKey ? "text" : "password"} 
+                  value={s2ApiKey}
+                  onChange={e => setS2ApiKey(e.target.value)}
+                  placeholder="Optional (improves rate limits)"
+                  style={{ flex: 1, padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', background: 'var(--bg-background)', color: 'var(--text-primary)' }}
+                />
+                <button 
+                  onClick={() => setShowApiKey(!showApiKey)}
+                  style={{ padding: '0 1rem', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface-hover)', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                >
+                  {showApiKey ? 'Hide' : 'View'}
+                </button>
+              </div>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                Provides fallback citation discovery. Get a free key at <a href="https://www.semanticscholar.org/product/api" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)' }}>semanticscholar.org</a>.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
+              <label style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Rate Limit (requests/sec)</label>
+              <input 
+                type="number" 
+                min="1"
+                value={s2RateLimit}
+                onChange={e => setS2RateLimit(parseInt(e.target.value) || 1)}
+                style={{ padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', background: 'var(--bg-background)', color: 'var(--text-primary)' }}
+              />
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                Limits how fast Bulk Expansion requests are sent. Defaults to 1.
+              </p>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem', padding: '1rem', background: 'var(--bg-surface-hover)', borderRadius: 'var(--radius-md)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Background Queue Status</label>
+                <button 
+                  onClick={fetchQueueStatus}
+                  style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', borderRadius: 'var(--radius-sm)', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                >
+                  Refresh
+                </button>
+              </div>
+              {queueStatus ? (
+                <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 600, color: queueStatus.pending > 0 ? 'var(--status-seed)' : 'var(--text-primary)' }}>{queueStatus.pending}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>Pending</div>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 600, color: queueStatus.failed > 0 ? '#ef4444' : 'var(--text-primary)' }}>{queueStatus.failed}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>Failed</div>
+                  </div>
+                </div>
+              ) : (
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>Loading status...</p>
+              )}
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem', padding: '1rem', background: 'var(--bg-surface-hover)', borderRadius: 'var(--radius-md)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>API Cache Management</label>
+              </div>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
+                Citation and reference lookups are cached to save bandwidth and API limits. You can invalidate the cache for papers in your current collection to force a fresh lookup.
+              </p>
+              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                <button 
+                  onClick={async () => {
+                    if (!activeCollectionId) return alert('Please select a collection first');
+                    try {
+                      const res = await fetch(`/api/settings/cache?collectionId=${activeCollectionId}`, { method: 'DELETE' });
+                      const data = await res.json();
+                      alert(data.message || 'Cache cleared');
+                    } catch (e) {
+                      console.error(e);
+                      alert('Failed to clear cache');
+                    }
+                  }}
+                  style={{ flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-md)', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}
+                >
+                  Clear Collection Cache
+                </button>
+                <button 
+                  onClick={async () => {
+                    try {
+                      const res = await fetch(`/api/settings/cache`, { method: 'DELETE' });
+                      const data = await res.json();
+                      alert(data.message || 'All cache cleared');
+                    } catch (e) {
+                      console.error(e);
+                      alert('Failed to clear cache');
+                    }
+                  }}
+                  style={{ flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-md)', background: 'transparent', border: '1px solid #ef4444', color: '#ef4444', cursor: 'pointer', fontSize: '0.8rem' }}
+                >
+                  Clear All Cache
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+              <button 
+                onClick={() => setShowSettings(false)}
+                style={{ padding: '0.5rem 1rem', borderRadius: 'var(--radius-sm)', background: 'transparent', color: 'var(--text-secondary)', border: 'none', cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={saveSettings}
+                style={{ padding: '0.5rem 1rem', borderRadius: 'var(--radius-sm)', background: 'var(--accent-primary)', color: '#fff', border: 'none', cursor: 'pointer' }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      </div>
+
+      <button
+        onClick={() => setIsCollapsed(!isCollapsed)}
+        className="glass-panel"
+        style={{
+           width: '30px', height: '60px', marginLeft: '0.5rem', 
+           display: 'flex', alignItems: 'center', justifyContent: 'center',
+           cursor: 'pointer', border: 'none', borderRadius: '0 8px 8px 0',
+           color: 'var(--text-primary)', fontWeight: 'bold'
+        }}
+      >
+        {isCollapsed ? '>' : '<'}
+      </button>
+    </div>
+  );
+}
