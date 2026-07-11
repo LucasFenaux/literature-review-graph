@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic';
 import { useCallback, useRef, useState, useEffect, useMemo } from 'react';
 import { useGraphStore, GraphNode } from '@/store/graphStore';
 import { formatAuthors, formatAuthorName } from '@/lib/formatters';
+import { matchesSearch } from '@/lib/search';
 
 import { forceX, forceY, forceCollide, forceManyBody } from 'd3-force';
 
@@ -12,7 +13,7 @@ const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false 
 
 export default function GraphCanvas() {
   const fgRef = useRef<any>(null);
-  const { graphData, setSelectedNode, selectedNode, relatedFilter, edgeFilter, focusedNodeId, setFocusedNodeId } = useGraphStore();
+  const { graphData, setSelectedNode, selectedNode, relatedFilter, collectionFilter, edgeFilter, focusedNodeId, setFocusedNodeId, exploreMode } = useGraphStore();
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
 
   useEffect(() => {
@@ -84,15 +85,24 @@ export default function GraphCanvas() {
       }
     }
 
-    if (relatedFilter) {
-      const q = relatedFilter.toLowerCase();
+    if (collectionFilter) {
       for (const n of nodes) {
-        if (!visibleIds.has(n.id)) continue;
+        if (!visibleIds.has(n.id) || n.status !== 'seed') continue;
         const rawAuthorsStr = Array.isArray(n.authors) ? n.authors.join(', ') : (n.authors || '');
         const formattedAuthorsStr = formatAuthors(n.authors);
-        const matches = n.title.toLowerCase().includes(q) || 
-               rawAuthorsStr.toLowerCase().includes(q) || 
-               formattedAuthorsStr.toLowerCase().includes(q);
+        const matches = matchesSearch(collectionFilter, [n.title, rawAuthorsStr, formattedAuthorsStr, n.abstract || '']);
+        if (!matches) {
+           visibleIds.delete(n.id);
+        }
+      }
+    }
+
+    if (relatedFilter) {
+      for (const n of nodes) {
+        if (!visibleIds.has(n.id) || n.status === 'seed') continue;
+        const rawAuthorsStr = Array.isArray(n.authors) ? n.authors.join(', ') : (n.authors || '');
+        const formattedAuthorsStr = formatAuthors(n.authors);
+        const matches = matchesSearch(relatedFilter, [n.title, rawAuthorsStr, formattedAuthorsStr, n.abstract || '']);
         if (!matches) {
            visibleIds.delete(n.id);
         }
@@ -100,7 +110,7 @@ export default function GraphCanvas() {
     }
     
     return visibleIds;
-  }, [graphData, relatedFilter, edgeFilter, focusedNodeId]);
+  }, [graphData, relatedFilter, collectionFilter, edgeFilter, focusedNodeId]);
 
   const scaleData = useMemo(() => {
     if (graphData.nodes.length === 0) return null;
@@ -117,16 +127,36 @@ export default function GraphCanvas() {
     const timestamps = graphData.nodes.map(getTimestamp);
     const uniqueTimestamps = Array.from(new Set(timestamps)).sort((a, b) => a - b);
     
-    let minMapped = uniqueTimestamps[0];
-    let maxMapped = uniqueTimestamps[uniqueTimestamps.length - 1];
+    // Logarithmic decay for older outliers (no compression for newer papers)
+    const sorted = [...timestamps].sort((a, b) => a - b);
+    const q1 = sorted[Math.floor(sorted.length * 0.25)];
+    const q3 = sorted[Math.floor(sorted.length * 0.75)];
+    const iqr = q3 - q1;
+    
+    // Use 1.5× IQR fence, with a minimum padding of 2 years
+    const twoYears = 2 * 365 * 24 * 60 * 60 * 1000;
+    const lowerFence = Math.min(q1, q1 - Math.max(1.5 * iqr, twoYears));
+    
+    const getMappedTime = (time: number) => {
+      if (time >= lowerFence) return time; // Linear for newer papers
+      const d = lowerFence - time;
+      // Compress the older dates logarithmically
+      return lowerFence - twoYears * Math.log(1 + d / twoYears);
+    };
+    
+    let minMapped = getMappedTime(sorted[0]);
+    let maxMapped = sorted[sorted.length - 1];
     
     if (minMapped === maxMapped) {
       const oneYear = 365 * 24 * 60 * 60 * 1000;
       minMapped -= oneYear;
       maxMapped += oneYear;
     }
-
-    const getMappedTime = (time: number) => time;
+    
+    // Add a small padding (5% of range) to give breathing room on edges
+    const rangePadding = (maxMapped - minMapped) * 0.05;
+    minMapped -= rangePadding;
+    maxMapped += rangePadding;
 
     const paperYearsSet = new Set<number>();
     graphData.nodes.forEach(n => {
@@ -418,6 +448,16 @@ export default function GraphCanvas() {
       }
     });
   }, [dimensions.width, dimensions.height, scaleData]);
+  useEffect(() => {
+    if (fgRef.current) {
+      // Minor zoom change to force re-evaluation of linkVisibility
+      const z = fgRef.current.zoom();
+      fgRef.current.zoom(z + 0.00001);
+      setTimeout(() => {
+        if (fgRef.current) fgRef.current.zoom(z);
+      }, 0);
+    }
+  }, [exploreMode]);
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: 'var(--bg-base)' }}>
@@ -428,7 +468,20 @@ export default function GraphCanvas() {
         linkVisibility={(link: any) => {
           const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
           const targetId = typeof link.target === 'object' ? link.target.id : link.target;
-          return visibleNodeIds.has(sourceId) && visibleNodeIds.has(targetId);
+          if (!visibleNodeIds.has(sourceId) || !visibleNodeIds.has(targetId)) return false;
+
+          if (!exploreMode) {
+            const sourceObj = typeof link.source === 'object' ? link.source : graphData.nodes.find(n => n.id === link.source);
+            const targetObj = typeof link.target === 'object' ? link.target : graphData.nodes.find(n => n.id === link.target);
+            const isSourceCollection = sourceObj?.status === 'seed' || sourceObj?.status === 'collection';
+            const isTargetCollection = targetObj?.status === 'seed' || targetObj?.status === 'collection';
+            
+            if (!isSourceCollection && !isTargetCollection) {
+              return false;
+            }
+          }
+
+          return true;
         }}
         onNodeDrag={(node: any) => {
            const isCore = node.status === 'seed' || node.status === 'collection';

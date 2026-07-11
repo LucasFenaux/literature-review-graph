@@ -3,11 +3,122 @@
 import { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
 import { useGraphStore, GraphNode } from '@/store/graphStore';
 import { formatAuthors } from '@/lib/formatters';
+import { matchesSearch } from '@/lib/search';
+import SearchInput from '@/components/SearchInput';
+
+function CitationModal({ node, onClose }: { node: GraphNode; onClose: () => void }) {
+  const [copiedFormat, setCopiedFormat] = useState<string | null>(null);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
+  const formattedAuthors = formatAuthors(node.authors);
+  const year = node.publicationDate ? node.publicationDate.split('-')[0] : (node.year || 'n.d.');
+  const title = node.title;
+  const venue = node.venue || 'No Venue';
+
+  // Basic BibTeX ID generation
+  const firstAuthorLast = formattedAuthors.split(',')[0]?.split(' ')[0] || 'Unknown';
+  const bibtexId = `${firstAuthorLast}${year}${title.split(' ')[0]}`.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+
+  const citations = {
+    APA: `${formattedAuthors} (${year}). ${title}. ${venue}.`,
+    MLA: `${formattedAuthors}. "${title}." ${venue}, ${year}.`,
+    Chicago: `${formattedAuthors}. "${title}." ${venue} (${year}).`,
+    Harvard: `${formattedAuthors}, ${year}. ${title}. ${venue}.`,
+    BibTeX: `@article{${bibtexId},\n  title={${title}},\n  author={${formattedAuthors}},\n  journal={${venue}},\n  year={${year}}\n}`
+  };
+
+  const handleCopy = (format: string, text: string, e: React.MouseEvent) => {
+    setMousePos({ x: e.clientX, y: e.clientY });
+    navigator.clipboard.writeText(text);
+    setCopiedFormat(format);
+    setTimeout(() => setCopiedFormat(null), 1500);
+  };
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0, left: 0, right: 0, bottom: 0,
+      background: 'rgba(0,0,0,0.5)',
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      zIndex: 200,
+      backdropFilter: 'blur(4px)'
+    }} onClick={onClose}>
+      <div className="glass-panel" style={{
+        background: 'var(--bg-surface)',
+        padding: '2rem',
+        borderRadius: 'var(--radius-lg)',
+        border: '1px solid var(--border-strong)',
+        width: '600px',
+        maxWidth: '90vw',
+        maxHeight: '90vh',
+        overflowY: 'auto',
+        position: 'relative'
+      }} onClick={e => e.stopPropagation()}>
+        <button 
+          onClick={onClose}
+          style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', fontSize: '1.5rem', lineHeight: 1 }}
+        >
+          &times;
+        </button>
+        <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '1.5rem' }}>Cite Paper</h2>
+        
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {Object.entries(citations).map(([format, text]) => (
+            <div key={format}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-secondary)' }}>{format}</span>
+              </div>
+              <div 
+                onClick={(e) => handleCopy(format, text, e)}
+                style={{
+                  padding: '0.75rem', 
+                  background: 'var(--bg-background)', 
+                  border: '1px solid var(--border-subtle)', 
+                  borderRadius: 'var(--radius-md)', 
+                  fontSize: '0.8rem', 
+                  color: 'var(--text-primary)',
+                  cursor: 'pointer',
+                  whiteSpace: format === 'BibTeX' ? 'pre-wrap' : 'normal',
+                  fontFamily: format === 'BibTeX' ? 'monospace' : 'inherit'
+                }}
+                title="Click to copy"
+              >
+                {text}
+              </div>
+            </div>
+          ))}
+        </div>
+        
+        {copiedFormat && (
+          <div style={{
+            position: 'fixed',
+            left: mousePos.x + 15,
+            top: mousePos.y - 25,
+            background: '#10b981',
+            color: 'white',
+            padding: '4px 8px',
+            borderRadius: '6px',
+            fontSize: '0.8rem',
+            fontWeight: 600,
+            pointerEvents: 'none',
+            zIndex: 1000,
+            boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+          }}>
+            Copied!
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function PaperPopup({ node, onClose, isRightPanelCollapsed }: { node: GraphNode; onClose: () => void; isRightPanelCollapsed?: boolean }) {
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [showSaved, setShowSaved] = useState(false);
+  const [showCitation, setShowCitation] = useState(false);
   const { graphData } = useGraphStore();
   const [hasMovedManually, setHasMovedManually] = useState(false);
   const [pos, setPos] = useState({ x: typeof window !== 'undefined' ? Math.max(360, window.innerWidth - (isRightPanelCollapsed ? 446 : 822)) : 300, y: 80 });
@@ -156,6 +267,12 @@ function PaperPopup({ node, onClose, isRightPanelCollapsed }: { node: GraphNode;
         </div>
 
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button onClick={() => setShowCitation(true)} style={{
+            padding: '0.4rem 0.8rem', borderRadius: '20px', background: 'var(--bg-surface-hover)',
+            color: 'var(--text-primary)', border: '1px solid var(--border-strong)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 500
+          }}>
+            Cite
+          </button>
           {node.url && (
             <a href={node.url} target="_blank" rel="noopener noreferrer" style={{
               padding: '0.4rem 0.8rem', borderRadius: '20px', background: 'var(--accent-primary)',
@@ -165,6 +282,35 @@ function PaperPopup({ node, onClose, isRightPanelCollapsed }: { node: GraphNode;
             </a>
           )}
         </div>
+
+        {node.status === 'seed' && (
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button
+              onClick={() => useGraphStore.getState().expandNode(node.id, 'citations')}
+              style={{
+                flex: 1, padding: '0.4rem', borderRadius: 'var(--radius-md)',
+                background: 'var(--bg-surface-hover)', color: 'var(--text-primary)', border: '1px solid var(--border-strong)',
+                cursor: 'pointer', fontWeight: 500, fontSize: '0.75rem', transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--accent-primary)'; e.currentTarget.style.color = 'white'; e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-surface-hover)'; e.currentTarget.style.color = 'var(--text-primary)'; e.currentTarget.style.borderColor = 'var(--border-strong)'; }}
+            >
+              Load Citations
+            </button>
+            <button
+              onClick={() => useGraphStore.getState().expandNode(node.id, 'references')}
+              style={{
+                flex: 1, padding: '0.4rem', borderRadius: 'var(--radius-md)',
+                background: 'var(--bg-surface-hover)', color: 'var(--text-primary)', border: '1px solid var(--border-strong)',
+                cursor: 'pointer', fontWeight: 500, fontSize: '0.75rem', transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--accent-secondary)'; e.currentTarget.style.color = 'white'; e.currentTarget.style.borderColor = 'var(--accent-secondary)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-surface-hover)'; e.currentTarget.style.color = 'var(--text-primary)'; e.currentTarget.style.borderColor = 'var(--border-strong)'; }}
+            >
+              Load References
+            </button>
+          </div>
+        )}
 
         {node.status !== 'seed' && (
           <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -245,16 +391,148 @@ function PaperPopup({ node, onClose, isRightPanelCollapsed }: { node: GraphNode;
           </button>
         </div>
       </div>
+      
+      {showCitation && <CitationModal node={node} onClose={() => setShowCitation(false)} />}
+    </div>
+  );
+}
+
+function BulkActionsPanel() {
+  const bulkLoading = useGraphStore(s => s.bulkLoading);
+  const [rebuilding, setRebuilding] = useState(false);
+  const isBusy = !!bulkLoading;
+
+  const citationsLoading = bulkLoading?.type === 'citations';
+  const referencesLoading = bulkLoading?.type === 'references';
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.5rem' }}>
+      <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <button
+          disabled={isBusy}
+          onClick={() => useGraphStore.getState().bulkExpand('citations')}
+          style={{
+            flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-md)',
+            background: citationsLoading ? 'var(--bg-surface-hover)' : 'var(--accent-primary)',
+            color: citationsLoading ? 'var(--text-primary)' : '#fff',
+            border: citationsLoading ? '1px solid var(--accent-primary)' : 'none',
+            cursor: isBusy ? 'not-allowed' : 'pointer', fontWeight: 500, fontSize: '0.75rem',
+            opacity: (isBusy && !citationsLoading) ? 0.5 : 1,
+            transition: 'all 0.2s'
+          }}
+        >
+          {citationsLoading
+            ? `Loading Citations (${bulkLoading!.current}/${bulkLoading!.total})`
+            : 'Bulk Load Citations'}
+        </button>
+        <button
+          disabled={isBusy}
+          onClick={() => useGraphStore.getState().bulkExpand('references')}
+          style={{
+            flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-md)',
+            background: referencesLoading ? 'var(--bg-surface-hover)' : 'var(--accent-secondary)',
+            color: referencesLoading ? 'var(--text-primary)' : '#fff',
+            border: referencesLoading ? '1px solid var(--accent-secondary)' : 'none',
+            cursor: isBusy ? 'not-allowed' : 'pointer', fontWeight: 500, fontSize: '0.75rem',
+            opacity: (isBusy && !referencesLoading) ? 0.5 : 1,
+            transition: 'all 0.2s'
+          }}
+        >
+          {referencesLoading
+            ? `Loading Refs (${bulkLoading!.current}/${bulkLoading!.total})`
+            : 'Bulk Load References'}
+        </button>
+      </div>
+
+      {isBusy && (
+        <div style={{
+          width: '100%', height: '3px', background: 'var(--bg-surface-hover)',
+          borderRadius: '2px', overflow: 'hidden'
+        }}>
+          <div style={{
+            height: '100%',
+            width: `${(bulkLoading!.current / bulkLoading!.total) * 100}%`,
+            background: citationsLoading ? 'var(--accent-primary)' : 'var(--accent-secondary)',
+            borderRadius: '2px',
+            transition: 'width 0.3s ease'
+          }} />
+        </div>
+      )}
+
+      <button
+        disabled={isBusy || rebuilding}
+        onClick={async () => {
+          setRebuilding(true);
+          await useGraphStore.getState().rebuildEdges();
+          setRebuilding(false);
+        }}
+        style={{
+          width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-md)',
+          background: 'transparent', color: isBusy ? 'var(--text-tertiary)' : 'var(--text-secondary)',
+          border: `1px solid ${isBusy ? 'var(--border-subtle)' : 'var(--border-strong)'}`,
+          cursor: (isBusy || rebuilding) ? 'not-allowed' : 'pointer', fontWeight: 500, fontSize: '0.75rem',
+          opacity: isBusy ? 0.5 : 1,
+          transition: 'all 0.2s'
+        }}
+        title={isBusy ? 'Wait for bulk loading to complete first' : ''}
+      >
+        {rebuilding ? 'Rebuilding...' : isBusy ? 'Rebuild Cross-Edges (wait for loading)' : 'Rebuild Cross-Edges'}
+      </button>
     </div>
   );
 }
 
 export default function DetailPanel() {
-  const { selectedNode, setSelectedNode, activeCollectionId, graphData, relatedFilter, setRelatedFilter, edgeFilter, setEdgeFilter, focusedNodeId } = useGraphStore();
+  const { selectedNode, setSelectedNode, activeCollectionId, graphData, relatedFilter, setRelatedFilter, collectionFilter, setCollectionFilter, edgeFilter, setEdgeFilter, focusedNodeId } = useGraphStore();
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [splitRatio, setSplitRatio] = useState(50);
 
   const scrollPositionRef = useRef<number>(0);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const collectionHeaderRef = useRef<HTMLDivElement>(null);
+  const relatedHeaderRef = useRef<HTMLDivElement>(null);
+  const isDraggingSplit = useRef(false);
+
+  const onMouseDownSplit = (e: React.MouseEvent) => {
+    e.preventDefault();
+    isDraggingSplit.current = true;
+    
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      if (!isDraggingSplit.current || !containerRef.current) return;
+      
+      const rect = containerRef.current.getBoundingClientRect();
+      const y = moveEvent.clientY - rect.top;
+      let newRatio = (y / rect.height) * 100;
+      
+      let minRatio = 15;
+      let maxRatio = 85;
+
+      if (collectionHeaderRef.current) {
+        // Add a small buffer (e.g. 10px) to ensure no clipping
+        const minH = collectionHeaderRef.current.getBoundingClientRect().height + 10;
+        minRatio = (minH / rect.height) * 100;
+      }
+      
+      if (relatedHeaderRef.current) {
+        // Leave room for the related header plus the 1.5rem divider itself
+        const minH = relatedHeaderRef.current.getBoundingClientRect().height + 30;
+        maxRatio = 100 - ((minH / rect.height) * 100);
+      }
+      
+      newRatio = Math.max(minRatio, Math.min(newRatio, maxRatio));
+      setSplitRatio(newRatio);
+    };
+    
+    const onMouseUp = () => {
+      isDraggingSplit.current = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+    
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
 
   useLayoutEffect(() => {
     if (!selectedNode && scrollContainerRef.current) {
@@ -263,10 +541,7 @@ export default function DetailPanel() {
   }, [selectedNode]);
 
   const getDisplayCitationCount = (node: GraphNode) => {
-    const loadedCount = graphData.links.filter(l =>
-      (typeof l.target === 'object' ? (l.target as any).id : l.target) === node.id
-    ).length;
-    return Math.max(node.citationCount || 0, loadedCount);
+    return node.citationCount || 0;
   };
 
   if (!activeCollectionId) return null;
@@ -283,14 +558,19 @@ export default function DetailPanel() {
     });
   }
 
-  const collectionNodes = graphData.nodes.filter(n => n.status === 'seed' && (!visibleIds || visibleIds.has(n.id)));
+  const allCollectionNodes = graphData.nodes.filter(n => n.status === 'seed' && (!visibleIds || visibleIds.has(n.id)));
+  const collectionNodes = allCollectionNodes.filter(n => {
+    if (!collectionFilter) return true;
+    const authorsStr = Array.isArray(n.authors) ? n.authors.join(', ') : (n.authors || '');
+    return matchesSearch(collectionFilter, [n.title, authorsStr, n.abstract || '']);
+  });
+
   const allRelatedNodes = graphData.nodes.filter(n => n.status !== 'seed' && (!visibleIds || visibleIds.has(n.id)));
   
   const filteredRelatedNodes = allRelatedNodes.filter(n => {
     if (!relatedFilter) return true;
-    const q = relatedFilter.toLowerCase();
     const authorsStr = Array.isArray(n.authors) ? n.authors.join(', ') : (n.authors || '');
-    return n.title.toLowerCase().includes(q) || authorsStr.toLowerCase().includes(q);
+    return matchesSearch(relatedFilter, [n.title, authorsStr, n.abstract || '']);
   });
 
   const maxEdges = useMemo(() => {
@@ -365,129 +645,131 @@ export default function DetailPanel() {
           {isCollapsed ? '<' : '>'}
         </button>
         
-        <div className="glass-panel" style={{
+        <div className="glass-panel" ref={containerRef} style={{
           width: '360px',
           height: '100%',
           padding: '1.5rem',
           borderRadius: 'var(--radius-lg)',
           display: 'flex',
           flexDirection: 'column',
-          gap: '1rem',
+          gap: 0,
           overflow: 'hidden'
         }}>
-          <h2 style={{ fontSize: '1.2rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-            Collection Papers
-          </h2>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-            {collectionNodes.length} papers in this collection
-          </p>
+          {/* Collection Section */}
+          <div style={{ display: 'flex', flexDirection: 'column', height: `${splitRatio}%`, minHeight: 0 }}>
+            <div ref={collectionHeaderRef} style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1rem' }}>
+              <div>
+                <h2 style={{ fontSize: '1.2rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  Collection Papers
+                </h2>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                  {collectionNodes.length} papers in this collection
+                </p>
+              </div>
 
-        {collectionNodes.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.5rem' }}>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button
-                onClick={() => useGraphStore.getState().bulkExpand('citations')}
-                style={{
-                  flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-md)',
-                  background: 'var(--accent-primary)', color: '#fff',
-                  border: 'none', cursor: 'pointer', fontWeight: 500, fontSize: '0.75rem'
-                }}
-              >
-                Bulk Load Citations
-              </button>
-              <button
-                onClick={() => useGraphStore.getState().bulkExpand('references')}
-                style={{
-                  flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-md)',
-                  background: 'var(--accent-secondary)', color: '#fff',
-                  border: 'none', cursor: 'pointer', fontWeight: 500, fontSize: '0.75rem'
-                }}
-              >
-                Bulk Load References
-              </button>
-            </div>
-            <button
-              onClick={() => {
-                const btn = document.getElementById('rebuild-btn');
-                if (btn) btn.innerText = 'Rebuilding...';
-                useGraphStore.getState().rebuildEdges().then(() => {
-                  if (btn) btn.innerText = 'Rebuild Cross-Edges';
-                });
-              }}
-              id="rebuild-btn"
-              style={{
-                width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-md)',
-                background: 'transparent', color: 'var(--text-secondary)',
-                border: '1px solid var(--border-strong)', cursor: 'pointer', fontWeight: 500, fontSize: '0.75rem'
-              }}
-            >
-              Rebuild Cross-Edges
-            </button>
-          </div>
-        )}
+              {allCollectionNodes.length > 0 && (
+                <>
+                  <SearchInput
+                    value={collectionFilter}
+                    onChange={(v) => setCollectionFilter(v)}
+                    placeholder="Search collection papers..."
+                    storageKey="detail-collection-filter"
+                    style={{ width: '100%' }}
+                  />
+                  <BulkActionsPanel />
+                </>
+              )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem', padding: '0.75rem', background: 'var(--bg-surface-hover)', borderRadius: 'var(--radius-md)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Minimum Connections</label>
-            <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: 'var(--accent-primary)' }}>{edgeFilter}</span>
-          </div>
-          <input
-            type="range"
-            min={useLogScale ? 0 : 1}
-            max={useLogScale ? 100 : maxEdges}
-            step="1"
-            value={valueToStep(edgeFilter)}
-            onChange={(e) => setEdgeFilter(stepToValue(parseInt(e.target.value)))}
-            style={{ width: '100%', cursor: 'pointer' }}
-          />
-        </div>
-
-        <div
-          ref={scrollContainerRef}
-          onScroll={(e) => { scrollPositionRef.current = e.currentTarget.scrollTop; }}
-          style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem', paddingRight: '0.5rem' }}
-        >
-          {collectionNodes.map(node => (
-            <div key={node.id}
-              onClick={() => setSelectedNode(node)}
-              style={{
-                padding: '0.75rem', background: 'var(--bg-surface)',
-                borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)',
-                cursor: 'pointer'
-              }}
-            >
-              <h3 style={{ fontSize: '0.9rem', marginBottom: '0.25rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{node.title}</h3>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem' }}>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
-                  {node.year} • {getDisplayCitationCount(node)} citations
-                </span>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (window.confirm("Are you sure you want to remove this paper from your collection?")) {
-                      useGraphStore.getState().removeNode(node.id);
-                    }
-                  }}
-                  style={{
-                    padding: '0.25rem 0.5rem', background: 'transparent',
-                    color: '#ef4444', border: '1px solid #ef4444',
-                    borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '0.75rem'
-                  }}
-                >
-                  Remove
-                </button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '0.75rem', background: 'var(--bg-surface-hover)', borderRadius: 'var(--radius-md)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Minimum Connections</label>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: 'var(--accent-primary)' }}>{edgeFilter}</span>
+                </div>
+                <input
+                  type="range"
+                  min={useLogScale ? 0 : 1}
+                  max={useLogScale ? 100 : maxEdges}
+                  step="1"
+                  value={valueToStep(edgeFilter)}
+                  onChange={(e) => setEdgeFilter(stepToValue(parseInt(e.target.value)))}
+                  style={{ width: '100%', cursor: 'pointer' }}
+                />
               </div>
             </div>
-          ))}
-          {collectionNodes.length === 0 && (
-            <div style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--text-tertiary)', fontSize: '0.9rem' }}>
-              No papers added yet. Search on the left to add some!
-            </div>
-          )}
 
-          {allRelatedNodes.length > 0 && (
-            <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '1rem', marginBottom: '0.5rem' }}>
+            <div
+              ref={scrollContainerRef}
+              onScroll={(e) => { scrollPositionRef.current = e.currentTarget.scrollTop; }}
+              style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem', paddingRight: '0.5rem' }}
+            >
+              {collectionNodes.map(node => (
+                <div key={node.id}
+                  onClick={() => setSelectedNode(selectedNode?.id === node.id ? null : node)}
+                  style={{
+                    padding: '0.75rem', background: 'var(--bg-surface)',
+                    borderRadius: 'var(--radius-md)', 
+                    border: selectedNode?.id === node.id ? '2px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <h3 title={selectedNode?.id === node.id ? undefined : node.title} style={{ fontSize: '0.9rem', marginBottom: '0.25rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{node.title}</h3>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
+                      {node.year} • {getDisplayCitationCount(node)} citations
+                    </span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (window.confirm("Are you sure you want to remove this paper from your collection?")) {
+                          useGraphStore.getState().removeNode(node.id);
+                        }
+                      }}
+                      style={{
+                        padding: '0.25rem 0.5rem', background: 'transparent',
+                        color: '#ef4444', border: '1px solid #ef4444',
+                        borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '0.75rem'
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {allCollectionNodes.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--text-tertiary)', fontSize: '0.9rem' }}>
+                  No papers added yet. Search on the left to add some!
+                </div>
+              ) : collectionNodes.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--text-tertiary)', fontSize: '0.9rem' }}>
+                  No collection papers match your search.
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Draggable Divider */}
+          <div
+            onMouseDown={onMouseDownSplit}
+            style={{
+              height: '1.5rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'row-resize',
+              margin: '0 -1.5rem',
+              background: 'transparent',
+              position: 'relative',
+              zIndex: 10,
+              flexShrink: 0
+            }}
+          >
+            <div style={{ width: '40px', height: '4px', background: 'var(--border-strong)', borderRadius: '2px' }} />
+          </div>
+
+          {/* Related Section */}
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <div ref={relatedHeaderRef} style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                 <div>
                   <h2 style={{ fontSize: '1.2rem', fontWeight: 600, color: 'var(--text-primary)' }}>
                     Related Papers
@@ -496,48 +778,50 @@ export default function DetailPanel() {
                     {allRelatedNodes.length} citations and references
                   </p>
                 </div>
-                <button
-                  onClick={() => useGraphStore.getState().clearRelatedNodes()}
-                  style={{
-                    padding: '0.25rem 0.5rem', background: 'transparent',
-                    color: 'var(--text-secondary)', border: '1px solid var(--border-strong)',
-                    borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '0.75rem'
-                  }}
-                >
-                  Clear Graph
-                </button>
+                {allRelatedNodes.length > 0 && (
+                  <button
+                    onClick={() => useGraphStore.getState().clearRelatedNodes()}
+                    style={{
+                      padding: '0.25rem 0.5rem', background: 'transparent',
+                      color: 'var(--text-secondary)', border: '1px solid var(--border-strong)',
+                      borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '0.75rem'
+                    }}
+                  >
+                    Clear Graph
+                  </button>
+                )}
               </div>
 
-
-
-              <input
-                type="text"
-                placeholder="Search title or author..."
+              <SearchInput
                 value={relatedFilter}
-                onChange={(e) => setRelatedFilter(e.target.value)}
-                style={{
-                  width: '100%', padding: '0.5rem 0.75rem', marginBottom: '0.5rem',
-                  borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)',
-                  background: 'var(--bg-surface)', color: 'var(--text-primary)',
-                  outline: 'none', fontSize: '0.85rem'
-                }}
+                onChange={(v) => setRelatedFilter(v)}
+                placeholder="Search title, author, or abstract..."
+                storageKey="detail-related-filter"
+                style={{ width: '100%' }}
               />
+            </div>
 
-              {filteredRelatedNodes.length === 0 ? (
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem', paddingRight: '0.5rem' }}>
+              {allRelatedNodes.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '1rem 0', color: 'var(--text-tertiary)', fontSize: '0.85rem' }}>
+                  No related papers. Click a paper to load its citations/references.
+                </div>
+              ) : filteredRelatedNodes.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '1rem 0', color: 'var(--text-tertiary)', fontSize: '0.85rem' }}>
                   No related papers match your search.
                 </div>
               ) : (
                 filteredRelatedNodes.map(node => (
                   <div key={node.id}
-                    onClick={() => setSelectedNode(node)}
+                    onClick={() => setSelectedNode(selectedNode?.id === node.id ? null : node)}
                     style={{
                       padding: '0.75rem', background: 'var(--bg-surface)',
-                      borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-md)', 
+                      border: selectedNode?.id === node.id ? '2px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
                       cursor: 'pointer', opacity: 0.8
                     }}
                   >
-                    <h3 style={{ fontSize: '0.9rem', marginBottom: '0.25rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{node.title}</h3>
+                    <h3 title={selectedNode?.id === node.id ? undefined : node.title} style={{ fontSize: '0.9rem', marginBottom: '0.25rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{node.title}</h3>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem' }}>
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
                         {node.year} • {getDisplayCitationCount(node)} citations
@@ -559,10 +843,9 @@ export default function DetailPanel() {
                   </div>
                 ))
               )}
-            </>
-          )}
+            </div>
+          </div>
         </div>
-      </div>
     </div>
 
       {/* Floating draggable popup — only when a node is selected */}

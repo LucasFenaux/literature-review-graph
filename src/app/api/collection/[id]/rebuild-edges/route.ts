@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
+import { logS2ApiCall } from '@/lib/semanticscholar';
 
 const S2_API_URL = 'https://api.semanticscholar.org/graph/v1';
 const OPENALEX_API_URL = 'https://api.openalex.org';
@@ -53,6 +54,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           });
           
           if (res.ok) {
+            logS2ApiCall(`batch:paper/batch?fields=paperId,references.paperId`, false);
             const data = await res.json();
             for (const item of data) {
               if (!item || !item.paperId) continue;

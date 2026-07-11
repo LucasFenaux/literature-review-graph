@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useGraphStore } from '@/store/graphStore';
 import { Paper } from '@/lib/openalex';
 import { formatAuthors } from '@/lib/formatters';
+import SearchInput, { saveToHistory } from '@/components/SearchInput';
 
 export default function Sidebar() {
   const [loading, setLoading] = useState(false);
@@ -12,6 +13,10 @@ export default function Sidebar() {
   const [s2ApiKey, setS2ApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [s2RateLimit, setS2RateLimit] = useState(1);
+  const [dbBackupFolder, setDbBackupFolder] = useState('');
+  const [backupStatus, setBackupStatus] = useState('');
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [s2Usage, setS2Usage] = useState<{ last24h: { api: number; cached: number }; last7d: { api: number; cached: number }; allTime: { api: number } } | null>(null);
   
   // Background queue processor
   useEffect(() => {
@@ -44,17 +49,18 @@ export default function Sidebar() {
     loadCollectionGraph
   } = useGraphStore();
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSearch = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!searchQuery) return;
-    
+    saveToHistory('sidebar-paper-search', searchQuery);
     setLoading(true);
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
       const data = await res.json();
-      setSearchResults(data);
+      setSearchResults(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error(error);
+      setSearchResults([]);
     } finally {
       setLoading(false);
     }
@@ -78,11 +84,14 @@ export default function Sidebar() {
       const data = await res.json();
       if (data.semanticScholarApiKey) setS2ApiKey(data.semanticScholarApiKey);
       if (data.semanticScholarRateLimit) setS2RateLimit(parseInt(data.semanticScholarRateLimit) || 1);
+      if (data.dbBackupFolder) setDbBackupFolder(data.dbBackupFolder);
     } catch (e) {
       console.error(e);
     }
     fetchQueueStatus();
     setShowSettings(true);
+    // Fetch S2 usage
+    fetch('/api/settings/s2-usage').then(r => r.json()).then(setS2Usage).catch(() => {});
   };
 
   const saveSettings = async () => {
@@ -159,14 +168,23 @@ export default function Sidebar() {
           </button>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.5rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-            <input 
-              type="checkbox" 
-              id="exploreMode"
-              checked={exploreMode}
-              onChange={(e) => setExploreMode(e.target.checked)}
-            />
-            <label htmlFor="exploreMode">Explore Mode</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+            <div 
+              onClick={() => setExploreMode(!exploreMode)}
+              style={{
+                width: '36px', height: '20px', background: exploreMode ? 'var(--accent-primary)' : 'var(--bg-surface-hover)',
+                borderRadius: '10px', position: 'relative', cursor: 'pointer', transition: 'background 0.3s ease',
+                border: '1px solid var(--border-strong)'
+              }}
+            >
+              <div style={{
+                position: 'absolute', top: '2px', left: exploreMode ? '18px' : '2px',
+                width: '14px', height: '14px', background: 'white', borderRadius: '50%',
+                transition: 'left 0.3s cubic-bezier(0.4, 0.0, 0.2, 1)',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
+              }} />
+            </div>
+            <label style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setExploreMode(!exploreMode)}>Show Cross Edges</label>
           </div>
           <button 
             onClick={openSettings}
@@ -181,15 +199,16 @@ export default function Sidebar() {
       <div style={{ opacity: activeCollectionId ? 1 : 0.5, pointerEvents: activeCollectionId ? 'auto' : 'none' }}>
         <h2 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.75rem' }}>Add Papers</h2>
         <form onSubmit={handleSearch} style={{ display: 'flex', gap: '0.5rem' }}>
-          <input 
-            type="text" 
+          <SearchInput
             value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value);
-              if (!e.target.value) setSearchResults([]);
+            onChange={(v) => {
+              setSearchQuery(v);
+              if (!v) setSearchResults([]);
             }}
-            placeholder="Search DOI, keyword, or author..." 
-            style={{ flex: 1, padding: '0.5rem 0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', background: 'var(--bg-surface)', color: 'var(--text-primary)', outline: 'none' }}
+            onSubmit={() => handleSearch()}
+            placeholder="Search DOI, keyword, or author..."
+            storageKey="sidebar-paper-search"
+            style={{ flex: 1 }}
           />
           <button type="submit" disabled={loading} style={{ padding: '0.5rem 1rem', borderRadius: 'var(--radius-md)', background: 'var(--accent-primary)', color: 'white', border: 'none', cursor: 'pointer' }}>
             {loading ? '...' : 'Search'}
@@ -198,12 +217,17 @@ export default function Sidebar() {
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        {searchResults.map(paper => (
+        {(Array.isArray(searchResults) ? searchResults : []).map(paper => (
           <div key={paper.id} 
-            onClick={() => setPreviewPaper(paper)}
-            style={{ padding: '1rem', background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', cursor: 'pointer' }}
+            onClick={() => setPreviewPaper(previewPaper?.id === paper.id ? null : paper)}
+            style={{ 
+              padding: '1rem', background: 'var(--bg-surface)', 
+              borderRadius: 'var(--radius-md)', 
+              border: previewPaper?.id === paper.id ? '2px solid var(--accent-primary)' : '1px solid var(--border-subtle)', 
+              cursor: 'pointer' 
+            }}
           >
-            <h3 style={{ fontSize: '0.9rem', marginBottom: '0.25rem' }}>{paper.title}</h3>
+            <h3 title={previewPaper?.id === paper.id ? undefined : paper.title} style={{ fontSize: '0.9rem', marginBottom: '0.25rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{paper.title}</h3>
             {paper.venue && (
               <p style={{ fontSize: '0.8rem', color: 'var(--text-primary)', marginBottom: '0.25rem', fontStyle: 'italic' }}>
                 {paper.venue}
@@ -325,7 +349,9 @@ export default function Sidebar() {
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--border-strong)',
             width: '400px',
-            maxWidth: '90vw'
+            maxWidth: '90vw',
+            maxHeight: '90vh',
+            overflowY: 'auto'
           }} onClick={e => e.stopPropagation()}>
             <button 
               onClick={() => setShowSettings(false)}
@@ -370,6 +396,38 @@ export default function Sidebar() {
                 Limits how fast Bulk Expansion requests are sent. Defaults to 1.
               </p>
             </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem', padding: '1rem', background: 'var(--bg-surface-hover)', borderRadius: 'var(--radius-md)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>S2 API Usage</label>
+                <button
+                  onClick={() => fetch('/api/settings/s2-usage').then(r => r.json()).then(setS2Usage).catch(() => {})}
+                  style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', borderRadius: 'var(--radius-sm)', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                >
+                  Refresh
+                </button>
+              </div>
+              {s2Usage ? (
+                <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.25rem' }}>
+                  <div style={{ flex: 1, textAlign: 'center' }}>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)' }}>{s2Usage.last24h.api}</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>API (24h)</div>
+                    <div style={{ fontSize: '0.65rem', color: 'var(--text-tertiary)', opacity: 0.7 }}>{s2Usage.last24h.cached} cached</div>
+                  </div>
+                  <div style={{ flex: 1, textAlign: 'center' }}>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)' }}>{s2Usage.last7d.api}</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>API (7d)</div>
+                    <div style={{ fontSize: '0.65rem', color: 'var(--text-tertiary)', opacity: 0.7 }}>{s2Usage.last7d.cached} cached</div>
+                  </div>
+                  <div style={{ flex: 1, textAlign: 'center' }}>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)' }}>{s2Usage.allTime.api}</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>API (all time)</div>
+                  </div>
+                </div>
+              ) : (
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>Loading...</p>
+              )}
+            </div>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem', padding: '1rem', background: 'var(--bg-surface-hover)', borderRadius: 'var(--radius-md)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -395,6 +453,105 @@ export default function Sidebar() {
               ) : (
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>Loading status...</p>
               )}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem', padding: '1rem', background: 'var(--bg-surface-hover)', borderRadius: 'var(--radius-md)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Database Backup & Restore</label>
+              </div>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
+                Select a folder to enable automatic database backups (runs every 12 hours). You can also trigger a manual backup or restore the database from a backup file.
+              </p>
+              
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.25rem' }}>
+                <input
+                  type="text"
+                  value={dbBackupFolder}
+                  readOnly
+                  placeholder="No backup folder selected..."
+                  style={{ flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', background: 'var(--bg-surface)', color: 'var(--text-primary)', outline: 'none', fontSize: '0.8rem' }}
+                />
+                <button
+                  onClick={async () => {
+                    const res = await fetch('/api/settings/backup/folder');
+                    const data = await res.json();
+                    if (data.path) {
+                      setDbBackupFolder(data.path);
+                      await fetch('/api/settings/backup/folder', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ folderPath: data.path })
+                      });
+                      setBackupStatus('Folder saved!');
+                      setTimeout(() => setBackupStatus(''), 3000);
+                    } else if (data.error) {
+                      alert(data.error);
+                    }
+                  }}
+                  style={{ padding: '0.5rem', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', border: '1px solid var(--border-strong)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '0.8rem' }}
+                >
+                  Select Folder
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                <button 
+                  onClick={async () => {
+                    setBackupStatus('Backing up...');
+                    try {
+                      const res = await fetch('/api/settings/backup/manual', { method: 'POST' });
+                      const data = await res.json();
+                      if (data.success) {
+                        setBackupStatus('Backup complete!');
+                      } else {
+                        setBackupStatus(`Error: ${data.error}`);
+                      }
+                    } catch (e: any) {
+                      setBackupStatus(`Error: ${e.message}`);
+                    }
+                    setTimeout(() => setBackupStatus(''), 4000);
+                  }}
+                  style={{ flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-md)', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}
+                >
+                  Manual Backup Now
+                </button>
+                <button 
+                  disabled={isRestoring}
+                  onClick={async () => {
+                    try {
+                      const res = await fetch('/api/settings/backup/restore');
+                      const data = await res.json();
+                      if (data.path) {
+                        if (confirm(`Are you sure you want to restore the database from ${data.path}? Your current database will be backed up as pre_restore_backup.db`)) {
+                          setIsRestoring(true);
+                          setBackupStatus('Restoring...');
+                          const restoreRes = await fetch('/api/settings/backup/restore', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ backupPath: data.path })
+                          });
+                          const restoreData = await restoreRes.json();
+                          if (restoreData.success) {
+                            alert('Restore successful! The page will now reload.');
+                            window.location.reload();
+                          } else {
+                            alert(`Restore failed: ${restoreData.error}`);
+                            setBackupStatus('');
+                            setIsRestoring(false);
+                          }
+                        }
+                      } else if (data.error) {
+                        alert(data.error);
+                      }
+                    } catch (e: any) {
+                      alert(`Error picking file: ${e.message}`);
+                    }
+                  }}
+                  style={{ flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-md)', background: 'transparent', border: '1px solid #ef4444', color: '#ef4444', cursor: isRestoring ? 'not-allowed' : 'pointer', fontSize: '0.8rem', opacity: isRestoring ? 0.5 : 1 }}
+                >
+                  {isRestoring ? 'Restoring...' : 'Restore Database'}
+                </button>
+              </div>
+              {backupStatus && <div style={{ fontSize: '0.75rem', color: 'var(--status-seed)' }}>{backupStatus}</div>}
             </div>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem', padding: '1rem', background: 'var(--bg-surface-hover)', borderRadius: 'var(--radius-md)' }}>

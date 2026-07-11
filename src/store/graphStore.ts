@@ -31,17 +31,20 @@ interface GraphState {
   exploreMode: boolean; // toggle for cross-collection citations
   searchQuery: string;
   relatedFilter: string;
+  collectionFilter: string;
   edgeFilter: number;
   searchResults: Paper[];
   graphData: GraphData;
   selectedNode: GraphNode | null;
   focusedNodeId: string | null;
+  bulkLoading: { type: string; current: number; total: number } | null;
   
   setCollections: (collections: Collection[]) => void;
   setActiveCollectionId: (id: string | null) => void;
   setExploreMode: (mode: boolean) => void;
   setSearchQuery: (query: string) => void;
   setRelatedFilter: (query: string) => void;
+  setCollectionFilter: (query: string) => void;
   setEdgeFilter: (filter: number) => void;
   setSearchResults: (results: Paper[]) => void;
   setGraphData: (data: GraphData) => void;
@@ -64,20 +67,23 @@ export const useGraphStore = create<GraphState>()(
     (set, get) => ({
       collections: [],
       activeCollectionId: null,
-      exploreMode: true,
+      exploreMode: false,
       searchQuery: '',
       relatedFilter: '',
+      collectionFilter: '',
       edgeFilter: 1,
       searchResults: [],
       graphData: { nodes: [], links: [] },
       selectedNode: null,
       focusedNodeId: null,
+      bulkLoading: null,
       
       setCollections: (collections) => set({ collections }),
-      setActiveCollectionId: (id) => set({ activeCollectionId: id }),
+      setActiveCollectionId: (id) => set({ activeCollectionId: id, selectedNode: null, focusedNodeId: null }),
       setExploreMode: (mode) => set({ exploreMode: mode }),
       setSearchQuery: (query) => set({ searchQuery: query }),
       setRelatedFilter: (query) => set({ relatedFilter: query }),
+      setCollectionFilter: (query) => set({ collectionFilter: query }),
       setEdgeFilter: (filter) => set({ edgeFilter: filter }),
       setSearchResults: (results) => set({ searchResults: results }),
       setGraphData: (data) => set({ graphData: data }),
@@ -182,11 +188,14 @@ export const useGraphStore = create<GraphState>()(
     }
 
     try {
-      await fetch('/api/collection', {
+      const res = await fetch('/api/collection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...paper, status: 'seed', collectionId: activeCollectionId })
       });
+      if (res.ok) {
+        await get().loadCollectionGraph(activeCollectionId);
+      }
     } catch (error) {
       console.error('Failed to add seed to DB', error);
     }
@@ -266,12 +275,12 @@ export const useGraphStore = create<GraphState>()(
 
   bulkExpand: async (type: 'citations' | 'references') => {
     const { graphData, expandNode } = get();
-    // Snapshot the nodes to avoid infinite loop
     const nodesToExpand = graphData.nodes
       .filter(n => n.status === 'seed')
       .map(n => n.id);
     
-    // Fetch rate limit setting
+    set({ bulkLoading: { type, current: 0, total: nodesToExpand.length } });
+    
     let delay = 1000;
     try {
       const res = await fetch('/api/settings');
@@ -286,11 +295,13 @@ export const useGraphStore = create<GraphState>()(
       console.error('Failed to get rate limit settings', e);
     }
     
-    for (const id of nodesToExpand) {
-      await expandNode(id, type);
-      // Wait calculated delay between requests to respect rate limits
+    for (let i = 0; i < nodesToExpand.length; i++) {
+      set({ bulkLoading: { type, current: i + 1, total: nodesToExpand.length } });
+      await expandNode(nodesToExpand[i], type);
       await new Promise(r => setTimeout(r, delay));
     }
+    
+    set({ bulkLoading: null });
   },
 
   rebuildEdges: async () => {
@@ -316,7 +327,10 @@ export const useGraphStore = create<GraphState>()(
       activeCollectionId: state.activeCollectionId,
       exploreMode: state.exploreMode,
       searchQuery: state.searchQuery,
-      searchResults: state.searchResults
+      searchResults: state.searchResults,
+      relatedFilter: state.relatedFilter,
+      collectionFilter: state.collectionFilter,
+      edgeFilter: state.edgeFilter
     }),
   }
 ));

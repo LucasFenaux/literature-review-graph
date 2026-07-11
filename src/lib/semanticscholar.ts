@@ -11,6 +11,15 @@ function getHeaders(): HeadersInit {
   return {};
 }
 
+export function logS2ApiCall(endpoint: string, cached: boolean) {
+  try {
+    const db = require('./db').default;
+    db.prepare('INSERT INTO s2_api_log (endpoint, cached) VALUES (?, ?)').run(endpoint, cached ? 1 : 0);
+  } catch (e) {
+    // Silently fail — logging should never break the app
+  }
+}
+
 function mapS2ToPaper(s2Paper: any): Paper {
   return {
     id: `s2:${s2Paper.paperId}`,
@@ -37,6 +46,7 @@ async function fetchWithBackoff(url: string, retries = 3): Promise<any> {
     if (row) {
       const ts = new Date(row.timestamp).getTime();
       if (Date.now() - ts < CACHE_TTL_MS) {
+        logS2ApiCall(url, true);
         return { ok: true, json: async () => JSON.parse(row.data) };
       }
     }
@@ -50,6 +60,7 @@ async function fetchWithBackoff(url: string, retries = 3): Promise<any> {
   while (attempt < retries) {
     const res = await fetch(url, { headers: getHeaders() });
     if (res.status !== 429) {
+      logS2ApiCall(url, false);
       if (res.ok) {
         const cloned = res.clone();
         const data = await cloned.text();

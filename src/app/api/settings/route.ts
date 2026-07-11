@@ -20,9 +20,22 @@ export async function GET() {
       if (process.env.SEMANTIC_SCHOLAR_RATE_LIMIT) rateLimit = process.env.SEMANTIC_SCHOLAR_RATE_LIMIT;
     }
     
+    // Fetch db backup folder from DB
+    let dbBackupFolder = '';
+    try {
+      const db = require('@/lib/db').default;
+      const backupFolderRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('db_backup_folder') as any;
+      if (backupFolderRow && backupFolderRow.value) {
+        dbBackupFolder = backupFolderRow.value;
+      }
+    } catch (e) {
+      console.error('Failed to fetch backup folder', e);
+    }
+    
     return NextResponse.json({ 
       semanticScholarApiKey: apiKey,
-      semanticScholarRateLimit: rateLimit
+      semanticScholarRateLimit: rateLimit,
+      dbBackupFolder
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
