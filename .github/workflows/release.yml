@@ -22,7 +22,7 @@ jobs:
             target: node18-macos-x64
             artifact_name: literature-review-graph-macos
             final_name: app-macos
-          - os: windows-latest
+          - os: windows-2022
             target: node18-win-x64
             artifact_name: literature-review-graph-win.exe
             final_name: app-windows.exe
