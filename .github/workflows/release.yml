@@ -16,15 +16,15 @@ jobs:
         include:
           - os: ubuntu-latest
             target: node18-linux-x64
-            artifact_name: literature-review-graph-linux
+            artifact_name: literature-review-graph
             final_name: app-linux
           - os: macos-latest
             target: node18-macos-x64
-            artifact_name: literature-review-graph-macos
+            artifact_name: literature-review-graph
             final_name: app-macos
           - os: windows-2022
             target: node18-win-x64
-            artifact_name: literature-review-graph-win.exe
+            artifact_name: literature-review-graph.exe
             final_name: app-windows.exe
 
     runs-on: ${{ matrix.os }}
