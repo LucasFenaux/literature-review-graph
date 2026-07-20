@@ -3,16 +3,25 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "concurrently \"next dev\" \"DEV_API_PORT=8005 tsx server/index.ts\"",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "build:server": "esbuild server/index.ts --bundle --platform=node --target=node20 --outdir=dist",
+    "build:exe": "npm run build && npm run build:server && npx pkg dist/index.js --target node18-macos-x64,node18-linux-x64,node18-win-x64 --out-path release"
+  },
+  "pkg": {
+    "assets": [
+      "out/**/*"
+    ]
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",
     "bibtex-parse-js": "^0.0.24",
+    "cors": "^2.8.6",
     "d3-force": "^3.0.0",
     "dotenv": "^17.4.2",
+    "express": "^5.2.1",
     "lucide-react": "^1.23.0",
     "next": "16.2.10",
     "react": "19.2.4",
@@ -22,12 +31,18 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/cors": "^2.8.19",
     "@types/d3-force": "^3.0.10",
+    "@types/express": "^5.0.6",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^10.0.3",
+    "esbuild": "^0.28.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
+    "pkg": "^5.8.1",
+    "tsx": "^4.23.1",
     "typescript": "^5"
   }
 }

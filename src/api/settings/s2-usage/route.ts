@@ -30,10 +30,14 @@ export async function GET() {
       'SELECT COUNT(*) as count FROM s2_api_log WHERE cached = 0'
     ).get() as any)?.count || 0;
 
+    const cachedAllTime = (db.prepare(
+      'SELECT COUNT(*) as count FROM s2_api_log WHERE cached = 1'
+    ).get() as any)?.count || 0;
+
     return NextResponse.json({
       last24h: { api: total24h, cached: cached24h },
       last7d: { api: total7d, cached: cached7d },
-      allTime: { api: totalAllTime }
+      allTime: { api: totalAllTime, cached: cachedAllTime }
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

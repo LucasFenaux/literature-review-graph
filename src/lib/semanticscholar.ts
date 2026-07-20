@@ -38,7 +38,28 @@ function mapS2ToPaper(s2Paper: any): Paper {
 
 async function fetchWithBackoff(url: string, retries = 3): Promise<any> {
   const db = (await import('./db')).default;
-  const CACHE_TTL_MS = 24 * 60 * 60 * 1000; 
+  let cacheFreshnessDays = 7;
+  if (url.includes('/references?')) {
+    if (process.env.CACHE_FRESHNESS_REFERENCES_DAYS) {
+      cacheFreshnessDays = parseInt(process.env.CACHE_FRESHNESS_REFERENCES_DAYS, 10);
+    } else if (process.env.CACHE_FRESHNESS_DAYS) {
+      cacheFreshnessDays = parseInt(process.env.CACHE_FRESHNESS_DAYS, 10);
+    } else {
+      cacheFreshnessDays = 30; // default for references
+    }
+  } else {
+    // Citations or search queries
+    if (process.env.CACHE_FRESHNESS_CITATIONS_DAYS) {
+      cacheFreshnessDays = parseInt(process.env.CACHE_FRESHNESS_CITATIONS_DAYS, 10);
+    } else if (process.env.CACHE_FRESHNESS_DAYS) {
+      cacheFreshnessDays = parseInt(process.env.CACHE_FRESHNESS_DAYS, 10);
+    } else {
+      cacheFreshnessDays = 7; // default for citations
+    }
+  }
+  if (isNaN(cacheFreshnessDays)) cacheFreshnessDays = 7;
+  
+  const CACHE_TTL_MS = cacheFreshnessDays * 24 * 60 * 60 * 1000;
   
   // Check cache
   try {

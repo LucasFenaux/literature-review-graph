@@ -13,10 +13,11 @@ export default function Sidebar() {
   const [s2ApiKey, setS2ApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [s2RateLimit, setS2RateLimit] = useState(1);
-  const [dbBackupFolder, setDbBackupFolder] = useState('');
+  const [cacheFreshnessCitations, setCacheFreshnessCitations] = useState('7');
+  const [cacheFreshnessReferences, setCacheFreshnessReferences] = useState('30');
   const [backupStatus, setBackupStatus] = useState('');
   const [isRestoring, setIsRestoring] = useState(false);
-  const [s2Usage, setS2Usage] = useState<{ last24h: { api: number; cached: number }; last7d: { api: number; cached: number }; allTime: { api: number } } | null>(null);
+  const [s2Usage, setS2Usage] = useState<{ last24h: { api: number; cached: number }; last7d: { api: number; cached: number }; allTime: { api: number; cached: number } } | null>(null);
   
   // Background queue processor
   useEffect(() => {
@@ -84,7 +85,8 @@ export default function Sidebar() {
       const data = await res.json();
       if (data.semanticScholarApiKey) setS2ApiKey(data.semanticScholarApiKey);
       if (data.semanticScholarRateLimit) setS2RateLimit(parseInt(data.semanticScholarRateLimit) || 1);
-      if (data.dbBackupFolder) setDbBackupFolder(data.dbBackupFolder);
+      if (data.cacheFreshnessCitations) setCacheFreshnessCitations(data.cacheFreshnessCitations);
+      if (data.cacheFreshnessReferences) setCacheFreshnessReferences(data.cacheFreshnessReferences);
     } catch (e) {
       console.error(e);
     }
@@ -101,9 +103,12 @@ export default function Sidebar() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           semanticScholarApiKey: s2ApiKey,
-          semanticScholarRateLimit: s2RateLimit.toString()
+          semanticScholarRateLimit: s2RateLimit.toString(),
+          cacheFreshnessCitations,
+          cacheFreshnessReferences
         })
       });
+      window.dispatchEvent(new Event('settingsUpdated'));
       setShowSettings(false);
     } catch (e) {
       console.error(e);
@@ -359,7 +364,23 @@ export default function Sidebar() {
             >
               &times;
             </button>
-            <h2 style={{ marginBottom: '1rem', fontSize: '1.2rem' }}>Settings</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h2 style={{ fontSize: '1.2rem', margin: 0 }}>Settings</h2>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button 
+                  onClick={() => setShowSettings(false)}
+                  style={{ padding: '0.4rem 0.75rem', borderRadius: 'var(--radius-sm)', background: 'transparent', color: 'var(--text-secondary)', border: 'none', cursor: 'pointer', fontSize: '0.8rem' }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={saveSettings}
+                  style={{ padding: '0.4rem 0.75rem', borderRadius: 'var(--radius-sm)', background: 'var(--accent-primary)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '0.8rem' }}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
               <label style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Semantic Scholar API Key</label>
@@ -397,6 +418,41 @@ export default function Sidebar() {
               </p>
             </div>
 
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
+              <label style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Cache Freshness (Citations)</label>
+              <select 
+                value={cacheFreshnessCitations}
+                onChange={e => setCacheFreshnessCitations(e.target.value)}
+                style={{ padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', background: 'var(--bg-background)', color: 'var(--text-primary)' }}
+              >
+                <option value="0">No cache</option>
+                <option value="1">1 day</option>
+                <option value="7">1 week</option>
+                <option value="30">1 month</option>
+              </select>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                How long to cache citation lookups.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
+              <label style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Cache Freshness (References)</label>
+              <select 
+                value={cacheFreshnessReferences}
+                onChange={e => setCacheFreshnessReferences(e.target.value)}
+                style={{ padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', background: 'var(--bg-background)', color: 'var(--text-primary)' }}
+              >
+                <option value="0">No cache</option>
+                <option value="1">1 day</option>
+                <option value="7">1 week</option>
+                <option value="30">1 month</option>
+                <option value="180">6 months</option>
+              </select>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                How long to cache reference lookups. References rarely change for published papers.
+              </p>
+            </div>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem', padding: '1rem', background: 'var(--bg-surface-hover)', borderRadius: 'var(--radius-md)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <label style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>S2 API Usage</label>
@@ -422,6 +478,7 @@ export default function Sidebar() {
                   <div style={{ flex: 1, textAlign: 'center' }}>
                     <div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)' }}>{s2Usage.allTime.api}</div>
                     <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>API (all time)</div>
+                    <div style={{ fontSize: '0.65rem', color: 'var(--text-tertiary)', opacity: 0.7 }}>{s2Usage.allTime.cached} cached</div>
                   </div>
                 </div>
               ) : (
@@ -459,39 +516,8 @@ export default function Sidebar() {
                 <label style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Database Backup & Restore</label>
               </div>
               <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
-                Select a folder to enable automatic database backups (runs every 12 hours). You can also trigger a manual backup or restore the database from a backup file.
+                Automatic backups run every 12 hours. You can also trigger a manual backup. Backups are stored in your data volume.
               </p>
-              
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.25rem' }}>
-                <input
-                  type="text"
-                  value={dbBackupFolder}
-                  readOnly
-                  placeholder="No backup folder selected..."
-                  style={{ flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', background: 'var(--bg-surface)', color: 'var(--text-primary)', outline: 'none', fontSize: '0.8rem' }}
-                />
-                <button
-                  onClick={async () => {
-                    const res = await fetch('/api/settings/backup/folder');
-                    const data = await res.json();
-                    if (data.path) {
-                      setDbBackupFolder(data.path);
-                      await fetch('/api/settings/backup/folder', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ folderPath: data.path })
-                      });
-                      setBackupStatus('Folder saved!');
-                      setTimeout(() => setBackupStatus(''), 3000);
-                    } else if (data.error) {
-                      alert(data.error);
-                    }
-                  }}
-                  style={{ padding: '0.5rem', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', border: '1px solid var(--border-strong)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '0.8rem' }}
-                >
-                  Select Folder
-                </button>
-              </div>
 
               <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
                 <button 

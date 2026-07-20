@@ -570,6 +570,10 @@ export default function GraphCanvas() {
             ctx.lineWidth = 4 / globalScale;
             ctx.strokeStyle = '#ec4899';
             ctx.stroke();
+          } else if (useGraphStore.getState().newlyAddedPapers?.includes(node.id)) {
+            ctx.lineWidth = 3 / globalScale;
+            ctx.strokeStyle = '#10b981';
+            ctx.stroke();
           }
           
           ctx.shadowBlur = 0;

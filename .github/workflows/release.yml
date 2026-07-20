@@ -1,0 +1,43 @@
+name: Release Standalone App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Executables
+        run: npm run build:exe
+
+      - name: Rename binaries for consistency
+        run: |
+          mv release/index-linux-x64 release/app-linux
+          mv release/index-macos-x64 release/app-macos
+          mv release/index-win-x64.exe release/app-windows.exe
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            release/app-linux
+            release/app-macos
+            release/app-windows.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

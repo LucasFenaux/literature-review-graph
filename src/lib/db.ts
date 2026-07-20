@@ -7,7 +7,11 @@ let lastBackupCheck = 0;
 
 export function getDb() {
   if (!db) {
-    const dbPath = path.join(process.cwd(), 'papers.db');
+    const dataDir = process.env.APP_DATA_DIR || path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    const dbPath = process.env.SQLITE_DB_PATH || path.join(dataDir, 'papers.db');
     db = new Database(dbPath, { verbose: console.log, timeout: 5000 });
     db.pragma('journal_mode = WAL');
 
@@ -92,8 +96,9 @@ export function getDb() {
 
 async function performSmartBackup() {
   try {
-    const backupFolderRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('db_backup_folder') as any;
-    if (!backupFolderRow || !backupFolderRow.value || backupFolderRow.value.trim() === '') return;
+    const dataDir = process.env.APP_DATA_DIR || path.join(process.cwd(), 'data');
+    const dbPath = process.env.SQLITE_DB_PATH || path.join(dataDir, 'papers.db');
+    const targetDir = path.join(path.dirname(dbPath), 'backups');
 
     const checkAndLock = db.transaction(() => {
       const lastBackupRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('last_db_backup_time') as any;
@@ -111,7 +116,6 @@ async function performSmartBackup() {
     const shouldBackup = checkAndLock.exclusive();
     if (!shouldBackup) return;
 
-    const targetDir = backupFolderRow.value.trim();
     if (!fs.existsSync(targetDir)) {
       fs.mkdirSync(targetDir, { recursive: true });
     }
@@ -143,21 +147,17 @@ export async function restoreDbFromBackup(backupPath: string) {
     throw new Error('Database is not initialized.');
   }
 
-  const backupFolderRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('db_backup_folder') as any;
-  let preRestorePath = path.join(process.cwd(), 'papers_pre_restore_backup.db');
-  
-  if (backupFolderRow && backupFolderRow.value && backupFolderRow.value.trim() !== '') {
-    const targetDir = backupFolderRow.value.trim();
-    if (!fs.existsSync(targetDir)) {
-      fs.mkdirSync(targetDir, { recursive: true });
-    }
-    preRestorePath = path.join(targetDir, 'papers_pre_restore_backup.db');
+  const dataDir = process.env.APP_DATA_DIR || path.join(process.cwd(), 'data');
+  const dbPath = process.env.SQLITE_DB_PATH || path.join(dataDir, 'papers.db');
+  const targetDir = path.join(path.dirname(dbPath), 'backups');
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
   }
+  let preRestorePath = path.join(targetDir, 'papers_pre_restore_backup.db');
 
   await db.backup(preRestorePath);
   db.close();
 
-  const dbPath = path.join(process.cwd(), 'papers.db');
   fs.copyFileSync(backupPath, dbPath);
 
   (db as any) = undefined;

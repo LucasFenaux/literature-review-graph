@@ -89,7 +89,12 @@ function deduplicatePapers(papers: Paper[]): Paper[] {
 // 24 hours caching
 async function fetchWithCache(url: string): Promise<any> {
   const db = (await import('./db')).default;
-  const CACHE_TTL_MS = 24 * 60 * 60 * 1000; 
+  let cacheFreshnessDays = 7;
+  if (process.env.CACHE_FRESHNESS_DAYS) {
+    cacheFreshnessDays = parseInt(process.env.CACHE_FRESHNESS_DAYS, 10);
+    if (isNaN(cacheFreshnessDays)) cacheFreshnessDays = 7;
+  }
+  const CACHE_TTL_MS = cacheFreshnessDays * 24 * 60 * 60 * 1000;
   
   // Check cache
   try {

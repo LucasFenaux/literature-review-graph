@@ -7,6 +7,7 @@ export interface GraphNode extends Paper {
   y?: number;
   val?: number; // size in graph
   status?: string;
+  notes?: string;
 }
 
 export interface GraphLink {
@@ -38,6 +39,7 @@ interface GraphState {
   selectedNode: GraphNode | null;
   focusedNodeId: string | null;
   bulkLoading: { type: string; current: number; total: number } | null;
+  newlyAddedPapers: string[] | null;
   
   setCollections: (collections: Collection[]) => void;
   setActiveCollectionId: (id: string | null) => void;
@@ -50,6 +52,7 @@ interface GraphState {
   setGraphData: (data: GraphData) => void;
   setSelectedNode: (node: GraphNode | null) => void;
   setFocusedNodeId: (id: string | null) => void;
+  clearNewlyAddedPapers: () => void;
   
   fetchCollections: () => Promise<void>;
   loadCollectionGraph: (collectionId: string) => Promise<void>;
@@ -77,6 +80,7 @@ export const useGraphStore = create<GraphState>()(
       selectedNode: null,
       focusedNodeId: null,
       bulkLoading: null,
+      newlyAddedPapers: null,
       
       setCollections: (collections) => set({ collections }),
       setActiveCollectionId: (id) => set({ activeCollectionId: id, selectedNode: null, focusedNodeId: null }),
@@ -89,6 +93,7 @@ export const useGraphStore = create<GraphState>()(
       setGraphData: (data) => set({ graphData: data }),
       setSelectedNode: (node) => set({ selectedNode: node }),
       setFocusedNodeId: (id) => set({ focusedNodeId: id }),
+      clearNewlyAddedPapers: () => set({ newlyAddedPapers: null }),
   
       clearRelatedNodes: async () => {
         const { activeCollectionId, graphData, selectedNode } = get();
@@ -155,7 +160,7 @@ export const useGraphStore = create<GraphState>()(
       const linksRes = await fetch(`/api/collection/links?collectionId=${collectionId}`);
       const links = await linksRes.json();
       
-      set({ graphData: { nodes, links }, activeCollectionId: collectionId });
+      set({ graphData: { nodes, links }, activeCollectionId: collectionId, edgeFilter: 1 });
     } catch (err) {
       console.error('Failed to load collection graph', err);
     }
@@ -267,14 +272,19 @@ export const useGraphStore = create<GraphState>()(
       if (data.citations) addNodesAndLinks(data.citations, true);
       if (data.references) addNodesAndLinks(data.references, false);
       
-      set({ graphData: { nodes: newNodes, links: newLinks } });
+      if (newNodes.length > graphData.nodes.length || newLinks.length > graphData.links.length) {
+        set({ graphData: { nodes: newNodes, links: newLinks } });
+      }
     } catch (err) {
       console.error('Failed to expand node', err);
     }
   },
 
   bulkExpand: async (type: 'citations' | 'references') => {
-    const { graphData, expandNode } = get();
+    const { graphData, expandNode, newlyAddedPapers } = get();
+    const existingNewlyAdded = newlyAddedPapers || [];
+    const initialNodes = new Set(graphData.nodes.map(n => n.id));
+    
     const nodesToExpand = graphData.nodes
       .filter(n => n.status === 'seed')
       .map(n => n.id);
@@ -295,13 +305,28 @@ export const useGraphStore = create<GraphState>()(
       console.error('Failed to get rate limit settings', e);
     }
     
+    let newlyAdded: string[] = [...existingNewlyAdded];
+
     for (let i = 0; i < nodesToExpand.length; i++) {
       set({ bulkLoading: { type, current: i + 1, total: nodesToExpand.length } });
       await expandNode(nodesToExpand[i], type);
+      
+      const currentNodes = get().graphData.nodes;
+      const currentNew = currentNodes.map(n => n.id).filter(id => !initialNodes.has(id));
+      const combinedNew = Array.from(new Set([...existingNewlyAdded, ...currentNew]));
+
+      if (combinedNew.length > newlyAdded.length) {
+        newlyAdded = combinedNew;
+        set({ newlyAddedPapers: newlyAdded });
+      }
+
       await new Promise(r => setTimeout(r, delay));
     }
     
-    set({ bulkLoading: null });
+    set({ 
+      bulkLoading: null,
+      newlyAddedPapers: newlyAdded.length > 0 ? newlyAdded : null
+    });
   },
 
   rebuildEdges: async () => {
@@ -330,7 +355,8 @@ export const useGraphStore = create<GraphState>()(
       searchResults: state.searchResults,
       relatedFilter: state.relatedFilter,
       collectionFilter: state.collectionFilter,
-      edgeFilter: state.edgeFilter
+      edgeFilter: state.edgeFilter,
+      newlyAddedPapers: state.newlyAddedPapers
     }),
   }
 ));

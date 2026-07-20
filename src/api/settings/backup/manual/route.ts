@@ -5,12 +5,9 @@ import path from 'path';
 
 export async function POST() {
   try {
-    const backupFolderRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('db_backup_folder') as any;
-    if (!backupFolderRow || !backupFolderRow.value || backupFolderRow.value.trim() === '') {
-      return NextResponse.json({ error: 'Please set and save a backup folder first.' }, { status: 400 });
-    }
-
-    const targetDir = backupFolderRow.value.trim();
+    const dbPath = process.env.SQLITE_DB_PATH || path.join(process.cwd(), 'papers.db');
+    const targetDir = path.join(path.dirname(dbPath), 'backups');
+    
     if (!fs.existsSync(targetDir)) {
       fs.mkdirSync(targetDir, { recursive: true });
     }

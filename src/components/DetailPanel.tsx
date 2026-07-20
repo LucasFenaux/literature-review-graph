@@ -358,7 +358,7 @@ function PaperPopup({ node, onClose, isRightPanelCollapsed }: { node: GraphNode;
               }}
               placeholder="Add your personal notes here... (Ctrl+S to save)"
               style={{
-                width: '100%', minHeight: '80px', padding: '0.75rem',
+                width: '100%', minHeight: '150px', padding: '0.75rem',
                 borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)',
                 background: 'var(--bg-surface)', color: 'var(--text-primary)',
                 resize: 'vertical', outline: 'none', fontFamily: 'inherit', fontSize: '0.85rem'
@@ -398,8 +398,24 @@ function PaperPopup({ node, onClose, isRightPanelCollapsed }: { node: GraphNode;
 }
 
 function BulkActionsPanel() {
-  const bulkLoading = useGraphStore(s => s.bulkLoading);
+  const { bulkLoading, activeCollectionId, graphData } = useGraphStore();
   const [rebuilding, setRebuilding] = useState(false);
+  const [cacheStatus, setCacheStatus] = useState<{ citations: { fresh: number, total: number }, references: { fresh: number, total: number } } | null>(null);
+
+  useEffect(() => {
+    if (!activeCollectionId) return;
+    const fetchStatus = async () => {
+      try {
+        const res = await fetch(`/api/collection/${activeCollectionId}/cache-status`);
+        const data = await res.json();
+        setCacheStatus(data);
+      } catch (e) {}
+    };
+    fetchStatus();
+    window.addEventListener('settingsUpdated', fetchStatus);
+    return () => window.removeEventListener('settingsUpdated', fetchStatus);
+  }, [activeCollectionId, bulkLoading, graphData.nodes.length]);
+
   const isBusy = !!bulkLoading;
 
   const citationsLoading = bulkLoading?.type === 'citations';
@@ -413,34 +429,36 @@ function BulkActionsPanel() {
           onClick={() => useGraphStore.getState().bulkExpand('citations')}
           style={{
             flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-md)',
-            background: citationsLoading ? 'var(--bg-surface-hover)' : 'var(--accent-primary)',
+            background: citationsLoading ? 'var(--bg-surface-hover)' : (cacheStatus && cacheStatus.citations.fresh < cacheStatus.citations.total ? '#f59e0b' : 'var(--accent-primary)'),
             color: citationsLoading ? 'var(--text-primary)' : '#fff',
             border: citationsLoading ? '1px solid var(--accent-primary)' : 'none',
             cursor: isBusy ? 'not-allowed' : 'pointer', fontWeight: 500, fontSize: '0.75rem',
             opacity: (isBusy && !citationsLoading) ? 0.5 : 1,
             transition: 'all 0.2s'
           }}
+          title={cacheStatus && cacheStatus.citations.fresh < cacheStatus.citations.total ? 'Some papers are not cached or the cache is stale. This will consume API rate limits.' : 'All papers are cached.'}
         >
           {citationsLoading
             ? `Loading Citations (${bulkLoading!.current}/${bulkLoading!.total})`
-            : 'Bulk Load Citations'}
+            : `Bulk Load Citations ${cacheStatus ? `(${cacheStatus.citations.fresh}/${cacheStatus.citations.total} cached)` : ''}`}
         </button>
         <button
           disabled={isBusy}
           onClick={() => useGraphStore.getState().bulkExpand('references')}
           style={{
             flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-md)',
-            background: referencesLoading ? 'var(--bg-surface-hover)' : 'var(--accent-secondary)',
+            background: referencesLoading ? 'var(--bg-surface-hover)' : (cacheStatus && cacheStatus.references.fresh < cacheStatus.references.total ? '#f59e0b' : 'var(--accent-secondary)'),
             color: referencesLoading ? 'var(--text-primary)' : '#fff',
             border: referencesLoading ? '1px solid var(--accent-secondary)' : 'none',
             cursor: isBusy ? 'not-allowed' : 'pointer', fontWeight: 500, fontSize: '0.75rem',
             opacity: (isBusy && !referencesLoading) ? 0.5 : 1,
             transition: 'all 0.2s'
           }}
+          title={cacheStatus && cacheStatus.references.fresh < cacheStatus.references.total ? 'Some papers are not cached or the cache is stale. This will consume API rate limits.' : 'All papers are cached.'}
         >
           {referencesLoading
             ? `Loading Refs (${bulkLoading!.current}/${bulkLoading!.total})`
-            : 'Bulk Load References'}
+            : `Bulk Load References ${cacheStatus ? `(${cacheStatus.references.fresh}/${cacheStatus.references.total} cached)` : ''}`}
         </button>
       </div>
 
@@ -482,10 +500,171 @@ function BulkActionsPanel() {
   );
 }
 
+function CompendiumNoteItem({ node }: { node: GraphNode }) {
+  const [notes, setNotes] = useState(node.notes || '');
+  const [isSaving, setIsSaving] = useState(false);
+  const [showSaved, setShowSaved] = useState(false);
+  const { activeCollectionId } = useGraphStore();
+
+  const handleSaveNotes = async () => {
+    if (!activeCollectionId) return;
+    
+    setIsSaving(true);
+    try {
+      await fetch(`/api/collection/${node.id}?collectionId=${activeCollectionId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes })
+      });
+      
+      const { graphData, selectedNode, setSelectedNode } = useGraphStore.getState();
+      const targetNode = graphData.nodes.find(n => n.id === node.id);
+      if (targetNode) {
+         (targetNode as any).notes = notes;
+      }
+      
+      if (selectedNode?.id === node.id) {
+         const updatedSelectedNode = { ...selectedNode, notes } as any;
+         setSelectedNode(updatedSelectedNode);
+      }
+      
+      setShowSaved(true);
+      setTimeout(() => setShowSaved(false), 2000);
+      
+    } catch (error) {
+      console.error('Failed to save notes', error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ padding: '1rem', background: 'var(--bg-background)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+      <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.25rem' }}>{node.title}</h3>
+      <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>{formatAuthors(node.authors)} • {node.publicationDate ? node.publicationDate.split('-')[0] : (node.year || 'n.d.')}</p>
+      
+      <div style={{ position: 'relative' }}>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          onKeyDown={(e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+              e.preventDefault();
+              handleSaveNotes();
+            }
+          }}
+          placeholder="Add your personal notes here... (Ctrl+S to save)"
+          style={{
+            width: '100%', minHeight: '150px', padding: '0.75rem',
+            borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)',
+            background: 'var(--bg-surface)', color: 'var(--text-primary)',
+            resize: 'vertical', outline: 'none', fontFamily: 'inherit', fontSize: '0.85rem'
+          }}
+        />
+        {showSaved && (
+          <div style={{
+            position: 'absolute', top: '0.5rem', right: '0.5rem',
+            background: 'rgba(16, 185, 129, 0.9)', color: 'white',
+            padding: '0.2rem 0.6rem', borderRadius: '4px', fontSize: '0.7rem',
+            fontWeight: 600, pointerEvents: 'none',
+            opacity: showSaved ? 1 : 0, transition: 'opacity 0.3s'
+          }}>
+            Saved ✓
+          </div>
+        )}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+        <button
+          onClick={handleSaveNotes}
+          disabled={isSaving || notes === node.notes}
+          style={{
+            padding: '0.4rem 1rem',
+            borderRadius: 'var(--radius-sm)', background: isSaving ? 'var(--bg-surface)' : (showSaved ? '#10b981' : 'var(--accent-secondary)'),
+            color: isSaving ? 'var(--text-secondary)' : '#fff', border: isSaving ? '1px solid var(--border-strong)' : 'none',
+            cursor: isSaving || notes === node.notes ? 'not-allowed' : 'pointer', fontWeight: 500,
+            transition: 'background 0.2s, color 0.2s', fontSize: '0.8rem',
+            opacity: notes === node.notes && !showSaved ? 0.5 : 1
+          }}
+        >
+          {isSaving ? 'Saving...' : showSaved ? 'Saved!' : 'Save Edits'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function NotesCompendiumModal({ nodes, onClose }: { nodes: GraphNode[]; onClose: () => void }) {
+  const nodesWithNotes = nodes.filter(n => n.notes && n.notes.trim().length > 0);
+
+  const downloadText = () => {
+    const lines = nodesWithNotes.map(n => {
+      const year = n.publicationDate ? n.publicationDate.split('-')[0] : (n.year || 'n.d.');
+      return `Title: ${n.title}\nAuthors: ${formatAuthors(n.authors)}\nYear: ${year}\nNotes:\n${n.notes}\n\n----------------------------------------\n`;
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Notes_Compendium.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadCSV = () => {
+    const escapeCsv = (str: string) => `"${str.replace(/"/g, '""')}"`;
+    const rows = nodesWithNotes.map(n => {
+      const year = n.publicationDate ? n.publicationDate.split('-')[0] : (n.year || 'n.d.');
+      return `${escapeCsv(n.title)},${escapeCsv(formatAuthors(n.authors))},${year},${escapeCsv(n.notes || '')}`;
+    });
+    const header = 'Title,Authors,Year,Notes\n';
+    const blob = new Blob([header + rows.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Notes_Compendium.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+      background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center',
+      zIndex: 200, backdropFilter: 'blur(4px)'
+    }} onClick={onClose}>
+      <div className="glass-panel" style={{
+        background: 'var(--bg-surface)', padding: '2rem', borderRadius: 'var(--radius-lg)',
+        border: '1px solid var(--border-strong)', width: '800px', maxWidth: '90vw', maxHeight: '90vh',
+        overflowY: 'auto', position: 'relative', display: 'flex', flexDirection: 'column'
+      }} onClick={e => e.stopPropagation()}>
+        <button onClick={onClose} style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', fontSize: '1.5rem', lineHeight: 1 }}>&times;</button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+          <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Notes Compendium</h2>
+          <div style={{ display: 'flex', gap: '0.5rem', paddingRight: '2rem' }}>
+            <button onClick={downloadText} disabled={nodesWithNotes.length === 0} style={{ padding: '0.5rem 1rem', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface-hover)', border: '1px solid var(--border-strong)', color: 'var(--text-primary)', cursor: nodesWithNotes.length === 0 ? 'not-allowed' : 'pointer', fontSize: '0.8rem' }}>Download TXT</button>
+            <button onClick={downloadCSV} disabled={nodesWithNotes.length === 0} style={{ padding: '0.5rem 1rem', borderRadius: 'var(--radius-md)', background: 'var(--accent-primary)', border: 'none', color: 'white', cursor: nodesWithNotes.length === 0 ? 'not-allowed' : 'pointer', fontSize: '0.8rem' }}>Download CSV</button>
+          </div>
+        </div>
+        
+        {nodesWithNotes.length === 0 ? (
+          <p style={{ color: 'var(--text-secondary)' }}>No notes found in this collection.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            {nodesWithNotes.map(n => (
+              <CompendiumNoteItem key={n.id} node={n} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function DetailPanel() {
-  const { selectedNode, setSelectedNode, activeCollectionId, graphData, relatedFilter, setRelatedFilter, collectionFilter, setCollectionFilter, edgeFilter, setEdgeFilter, focusedNodeId } = useGraphStore();
+  const { selectedNode, setSelectedNode, activeCollectionId, graphData, relatedFilter, setRelatedFilter, collectionFilter, setCollectionFilter, edgeFilter, setEdgeFilter, focusedNodeId, newlyAddedPapers, clearNewlyAddedPapers } = useGraphStore();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [splitRatio, setSplitRatio] = useState(50);
+  const [showNotesCompendium, setShowNotesCompendium] = useState(false);
 
   const scrollPositionRef = useRef<number>(0);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -544,7 +723,6 @@ export default function DetailPanel() {
     return node.citationCount || 0;
   };
 
-  if (!activeCollectionId) return null;
 
   let visibleIds: Set<string> | null = null;
   if (focusedNodeId) {
@@ -571,6 +749,12 @@ export default function DetailPanel() {
     if (!relatedFilter) return true;
     const authorsStr = Array.isArray(n.authors) ? n.authors.join(', ') : (n.authors || '');
     return matchesSearch(relatedFilter, [n.title, authorsStr, n.abstract || '']);
+  }).sort((a, b) => {
+    const aIsNew = newlyAddedPapers?.includes(a.id);
+    const bIsNew = newlyAddedPapers?.includes(b.id);
+    if (aIsNew && !bIsNew) return -1;
+    if (!aIsNew && bIsNew) return 1;
+    return 0;
   });
 
   const maxEdges = useMemo(() => {
@@ -612,6 +796,14 @@ export default function DetailPanel() {
     if (step === 0) return 1;
     return Math.round(Math.pow(maxEdges, step / 100));
   };
+
+  // Clamp edgeFilter to maxEdges in case it was set higher than the current maxEdges
+  // (e.g. if the user deleted the most connected paper)
+  useEffect(() => {
+    if (edgeFilter > maxEdges) {
+      setEdgeFilter(maxEdges);
+    }
+  }, [maxEdges, edgeFilter, setEdgeFilter]);
   
   const valueToStep = (val: number) => {
     if (!useLogScale) return val;
@@ -619,8 +811,51 @@ export default function DetailPanel() {
     return Math.round(100 * Math.log(val) / Math.log(maxEdges));
   };
 
+  if (!activeCollectionId) return null;
+
   return (
     <>
+      {newlyAddedPapers && (
+        <div className="glass-panel" style={{
+          position: 'fixed',
+          top: '1.5rem',
+          right: isCollapsed ? '50px' : '390px',
+          padding: '1rem 1.5rem',
+          borderRadius: 'var(--radius-lg)',
+          background: 'var(--bg-surface)',
+          border: '2px solid var(--status-seed)',
+          zIndex: 200,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '1rem',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+          transition: 'right 0.3s ease'
+        }}>
+          <div>
+            <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--status-seed)', margin: 0 }}>
+              {newlyAddedPapers.length} New Paper{newlyAddedPapers.length !== 1 ? 's' : ''} Found!
+            </h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: '0.25rem 0 0 0' }}>
+              Highlighted in the graph and list.
+            </p>
+          </div>
+          <button
+            onClick={clearNewlyAddedPapers}
+            style={{
+              background: 'var(--bg-surface-hover)',
+              border: '1px solid var(--border-strong)',
+              borderRadius: '50%',
+              width: '28px', height: '28px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', color: 'var(--text-primary)'
+            }}
+          >
+            &times;
+          </button>
+        </div>
+      )}
+      {showNotesCompendium && <NotesCompendiumModal nodes={allCollectionNodes} onClose={() => setShowNotesCompendium(false)} />}
+      
       {/* Sidebar — wrapper for toggle animation */}
       <div style={{
         position: 'absolute',
@@ -658,13 +893,25 @@ export default function DetailPanel() {
           {/* Collection Section */}
           <div style={{ display: 'flex', flexDirection: 'column', height: `${splitRatio}%`, minHeight: 0 }}>
             <div ref={collectionHeaderRef} style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1rem' }}>
-              <div>
-                <h2 style={{ fontSize: '1.2rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                  Collection Papers
-                </h2>
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                  {collectionNodes.length} papers in this collection
-                </p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <h2 style={{ fontSize: '1.2rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                    Collection Papers
+                  </h2>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                    {collectionNodes.length} papers in this collection
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowNotesCompendium(true)}
+                  style={{
+                    padding: '0.3rem 0.6rem', fontSize: '0.75rem', borderRadius: 'var(--radius-sm)',
+                    background: 'var(--bg-surface-hover)', border: '1px solid var(--border-strong)',
+                    color: 'var(--text-primary)', cursor: 'pointer', whiteSpace: 'nowrap'
+                  }}
+                >
+                  Notes Compendium
+                </button>
               </div>
 
               {allCollectionNodes.length > 0 && (
@@ -817,7 +1064,9 @@ export default function DetailPanel() {
                     style={{
                       padding: '0.75rem', background: 'var(--bg-surface)',
                       borderRadius: 'var(--radius-md)', 
-                      border: selectedNode?.id === node.id ? '2px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                      border: selectedNode?.id === node.id 
+                        ? '2px solid var(--accent-primary)' 
+                        : (newlyAddedPapers?.includes(node.id) ? '2px solid var(--status-seed)' : '1px solid var(--border-subtle)'),
                       cursor: 'pointer', opacity: 0.8
                     }}
                   >
