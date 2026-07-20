@@ -19,7 +19,7 @@ jobs:
             artifact_name: literature-review-graph
             final_name: app-linux
           - os: macos-latest
-            target: node18-macos-x64
+            target: node18-macos-arm64
             artifact_name: literature-review-graph
             final_name: app-macos
           - os: windows-2022
