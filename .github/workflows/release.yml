@@ -31,9 +31,9 @@ jobs:
 
       - name: Rename binaries for consistency
         run: |
-          mv release/index-linux release/app-linux
-          mv release/index-macos release/app-macos
-          mv release/index-win.exe release/app-windows.exe
+          mv release/literature-review-graph-linux release/app-linux
+          mv release/literature-review-graph-macos release/app-macos
+          mv release/literature-review-graph-win.exe release/app-windows.exe
 
       - name: Release
         uses: softprops/action-gh-release@v2
