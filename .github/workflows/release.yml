@@ -33,10 +33,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node.js 20 (Required for Next.js build)
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
           cache: 'npm'
 
       - name: Install Dependencies
@@ -46,6 +46,14 @@ jobs:
         run: |
           npm run build
           npm run build:server
+
+      - name: Setup Node.js 18 (Required for pkg native bindings)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Rebuild native extensions for Node 18
+        run: npm rebuild better-sqlite3
 
       - name: Build Executable
         run: npx pkg . --target ${{ matrix.target }} --out-path release
