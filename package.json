@@ -12,7 +12,8 @@
   },
   "pkg": {
     "assets": [
-      "out/**/*"
+      "out/**/*",
+      "node_modules/better-sqlite3/**/*.node"
     ]
   },
   "dependencies": {
