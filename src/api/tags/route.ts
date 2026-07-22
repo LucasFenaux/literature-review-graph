@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
-import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 
 export async function GET() {
   try {
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Name is required' }, { status: 400 });
     }
 
-    const id = uuidv4();
+    const id = crypto.randomUUID();
     const insertStmt = db.prepare(`
       INSERT INTO tags (id, name, color, weight)
       VALUES (?, ?, ?, ?)
