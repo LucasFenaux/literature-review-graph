@@ -13,7 +13,7 @@ const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false 
 
 export default function GraphCanvas() {
   const fgRef = useRef<any>(null);
-  const { graphData, setSelectedNode, selectedNode, relatedFilter, collectionFilter, edgeFilter, focusedNodeId, setFocusedNodeId, exploreMode } = useGraphStore();
+  const { graphData, setSelectedNode, selectedNode, relatedFilter, collectionFilter, edgeFilter, focusedNodeId, setFocusedNodeId, exploreMode, tagFilter } = useGraphStore();
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
 
   useEffect(() => {
@@ -108,9 +108,18 @@ export default function GraphCanvas() {
         }
       }
     }
+    if (tagFilter && tagFilter.length > 0) {
+      for (const n of nodes) {
+        if (!visibleIds.has(n.id)) continue;
+        const nodeTags = (n as any).localTags || [];
+        if (!tagFilter.every(tid => nodeTags.includes(tid))) {
+          visibleIds.delete(n.id);
+        }
+      }
+    }
     
     return visibleIds;
-  }, [graphData, relatedFilter, collectionFilter, edgeFilter, focusedNodeId]);
+  }, [graphData, relatedFilter, collectionFilter, edgeFilter, focusedNodeId, tagFilter]);
 
   const scaleData = useMemo(() => {
     if (graphData.nodes.length === 0) return null;
@@ -170,6 +179,7 @@ export default function GraphCanvas() {
   const maxMetrics = useMemo(() => {
     let maxCitations = 1;
     let maxEdges = 1;
+    let maxSeedEdges = 1;
     const nodeIds = new Set(graphData.nodes.map(n => n.id));
     
     graphData.nodes.forEach(n => {
@@ -192,47 +202,44 @@ export default function GraphCanvas() {
     
     for (const [id, count] of counts.entries()) {
        const node = graphData.nodes.find(n => n.id === id);
-       // Exclude seed nodes so their massive connections don't compress the scale for everyone else
-       if (node && node.status !== 'seed') {
-          if (count > maxEdges) maxEdges = count;
+       if (node) {
+          if (node.status === 'seed' || node.status === 'collection') {
+             if (count > maxSeedEdges) maxSeedEdges = count;
+          } else {
+             if (count > maxEdges) maxEdges = count;
+          }
        }
     }
     
-    return { maxEdges, maxCitations };
+    return { maxEdges, maxSeedEdges, maxCitations };
   }, [graphData.nodes, graphData.links]);
 
   const getNodeSizeFactor = useCallback((node: any) => {
-     // A normal paper has a base size of 1.0. 
-     // Collection nodes are a bit bigger by default, but they shouldn't scale by connections.
-     const COLLECTION_NODE_BASE_SIZE = 1.5;
-     
      let isCollectionNode = node.status === 'seed' || node.status === 'collection';
-     if (isCollectionNode) {
-        return COLLECTION_NODE_BASE_SIZE;
-     }
      
      const edges = node.edgeCount || 0;
      const citations = node.citationCount || 0;
-     const baseSize = 1.0;
      
-     // The user requested the maximum possible size to be 3x the base size of collection nodes
-     const MAX_FACTOR = 3.0 * COLLECTION_NODE_BASE_SIZE; // 4.5
+     // Base size is 2.0 for collection nodes, 1.0 for related papers
+     const baseSize = isCollectionNode ? 2.0 : 1.0;
      
-     // Cap at 1.0 because seed nodes can have far more edges than maxMetrics.maxEdges (which excludes seeds)
-     const edgeRatio = Math.min(1.0, edges / maxMetrics.maxEdges);
+     // The maximum possible size relative to the base size
+     const MAX_FACTOR = isCollectionNode ? 6.0 : 4.5;
+     
+     // Normalize edges depending on the type of node so seeds scale against seeds
+     const maxEdgesForType = isCollectionNode ? maxMetrics.maxSeedEdges : maxMetrics.maxEdges;
+     const edgeRatio = Math.min(1.0, edges / maxEdgesForType);
      
      // Use an exponential (cubic) curve for the edge ratio. 
-     // This ensures small/medium nodes stay small, and only the absolute top hubs become gargantuan.
      const expEdgeRatio = Math.pow(edgeRatio, 3);
      
      // Keep logarithmic for citations as citations can scale into the thousands
      const citationRatio = Math.log10(citations + 1) / Math.log10(maxMetrics.maxCitations + 1);
      
      // Combine the exponential edge ratio and citation ratio
-     // We weight the edge ratio heavily and citation ratio lightly.
      let combinedRatio = Math.min(1.0, expEdgeRatio + (citationRatio * 0.2));
      
-     // Bounded exponential scaling: it scales naturally up to MAX_FACTOR without just clipping!
+     // Bounded exponential scaling
      let factor = baseSize + (combinedRatio * (MAX_FACTOR - baseSize));
      
      return factor;

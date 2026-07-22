@@ -19,6 +19,8 @@ import * as settingsBackupManualRoute from '../src/api/settings/backup/manual/ro
 import * as settingsBackupRestoreRoute from '../src/api/settings/backup/restore/route';
 import * as settingsCacheRoute from '../src/api/settings/cache/route';
 import * as settingsS2UsageRoute from '../src/api/settings/s2-usage/route';
+import * as tagsRoute from '../src/api/tags/route';
+import * as tagsIdRoute from '../src/api/tags/[id]/route';
 
 const app = express();
 app.use(cors());
@@ -41,6 +43,8 @@ app.all('/api/settings/backup/manual', (req, res) => adaptNextRoute(req, res, se
 app.all('/api/settings/backup/restore', (req, res) => adaptNextRoute(req, res, settingsBackupRestoreRoute));
 app.all('/api/settings/cache', (req, res) => adaptNextRoute(req, res, settingsCacheRoute));
 app.all('/api/settings/s2-usage', (req, res) => adaptNextRoute(req, res, settingsS2UsageRoute));
+app.all('/api/tags', (req, res) => adaptNextRoute(req, res, tagsRoute));
+app.all('/api/tags/:id', (req, res) => adaptNextRoute(req, res, tagsIdRoute, { id: req.params.id }));
 
 const outPath = path.join(__dirname, '../out');
 app.use(express.static(outPath));

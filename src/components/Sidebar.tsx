@@ -10,6 +10,11 @@ export default function Sidebar() {
   const [loading, setLoading] = useState(false);
   const [previewPaper, setPreviewPaper] = useState<Paper | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showTagsModal, setShowTagsModal] = useState(false);
+  const [newTagName, setNewTagName] = useState('');
+  const [newTagColor, setNewTagColor] = useState('#888888');
+  const [newTagWeight, setNewTagWeight] = useState(0);
+  const [editingTag, setEditingTag] = useState<{ id: string, name: string, color: string, weight?: number } | null>(null);
   const [s2ApiKey, setS2ApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [s2RateLimit, setS2RateLimit] = useState(1);
@@ -47,7 +52,11 @@ export default function Sidebar() {
     setSearchResults,
     createCollection, 
     addSeedPaper,
-    loadCollectionGraph
+    loadCollectionGraph,
+    tags,
+    createTag,
+    updateTag,
+    deleteTag
   } = useGraphStore();
 
   const handleSearch = async (e?: React.FormEvent) => {
@@ -191,12 +200,20 @@ export default function Sidebar() {
             </div>
             <label style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setExploreMode(!exploreMode)}>Show Cross Edges</label>
           </div>
-          <button 
-            onClick={openSettings}
-            style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem', borderRadius: 'var(--radius-sm)', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', cursor: 'pointer' }}
-          >
-            Settings
-          </button>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button 
+              onClick={() => setShowTagsModal(true)}
+              style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem', borderRadius: 'var(--radius-sm)', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+            >
+              Tags
+            </button>
+            <button 
+              onClick={openSettings}
+              style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem', borderRadius: 'var(--radius-sm)', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+            >
+              Settings
+            </button>
+          </div>
         </div>
       </div>
 
@@ -331,6 +348,134 @@ export default function Sidebar() {
               >
                 Add to Collection
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tags Modal */}
+      {showTagsModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 100
+        }} onClick={() => setShowTagsModal(false)}>
+          <div style={{
+            position: 'relative',
+            background: 'var(--bg-surface)',
+            padding: '2rem',
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--border-strong)',
+            width: '400px',
+            maxWidth: '90vw',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem'
+          }} onClick={e => e.stopPropagation()}>
+            <button 
+              onClick={() => setShowTagsModal(false)}
+              style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: 'transparent', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', fontSize: '1.5rem', lineHeight: 1 }}
+            >
+              &times;
+            </button>
+            <h2 style={{ fontSize: '1.2rem', margin: 0 }}>Manage Tags</h2>
+            
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <input 
+                type="color"
+                value={editingTag ? editingTag.color : newTagColor}
+                onChange={e => editingTag ? setEditingTag({...editingTag, color: e.target.value}) : setNewTagColor(e.target.value)}
+                style={{ width: '32px', height: '32px', padding: '0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+              />
+              <input 
+                type="text"
+                placeholder={editingTag ? "Rename tag..." : "New tag name..."}
+                value={editingTag ? editingTag.name : newTagName}
+                onChange={e => editingTag ? setEditingTag({...editingTag, name: e.target.value}) : setNewTagName(e.target.value)}
+                style={{ flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', background: 'var(--bg-background)', color: 'var(--text-primary)' }}
+              />
+              <input 
+                type="number"
+                placeholder="Rank"
+                title="Weight/Rank (higher appears first)"
+                value={editingTag ? (editingTag.weight || 0) : newTagWeight}
+                onChange={e => editingTag ? setEditingTag({...editingTag, weight: parseInt(e.target.value) || 0}) : setNewTagWeight(parseInt(e.target.value) || 0)}
+                style={{ width: '60px', padding: '0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', background: 'var(--bg-background)', color: 'var(--text-primary)' }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if (editingTag) {
+                      updateTag(editingTag.id, editingTag.name, editingTag.color, editingTag.weight);
+                      setEditingTag(null);
+                    } else if (newTagName.trim()) {
+                      createTag(newTagName.trim(), newTagColor, newTagWeight);
+                      setNewTagName('');
+                      setNewTagWeight(0);
+                    }
+                  }
+                }}
+              />
+              <button 
+                onClick={() => {
+                  if (editingTag) {
+                    updateTag(editingTag.id, editingTag.name, editingTag.color, editingTag.weight);
+                    setEditingTag(null);
+                  } else if (newTagName.trim()) {
+                    createTag(newTagName.trim(), newTagColor, newTagWeight);
+                    setNewTagName('');
+                    setNewTagWeight(0);
+                  }
+                }}
+                disabled={editingTag ? !editingTag.name.trim() : !newTagName.trim()}
+                style={{ padding: '0.5rem 1rem', borderRadius: 'var(--radius-md)', background: 'var(--accent-primary)', color: 'white', border: 'none', cursor: 'pointer', opacity: (editingTag ? !editingTag.name.trim() : !newTagName.trim()) ? 0.5 : 1 }}
+              >
+                {editingTag ? 'Save' : 'Add'}
+              </button>
+              {editingTag && (
+                <button
+                  onClick={() => setEditingTag(null)}
+                  style={{ padding: '0.5rem', borderRadius: 'var(--radius-md)', background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-strong)', cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', overflowY: 'auto', flex: 1 }}>
+              {tags.map(tag => (
+                <div key={tag.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem', background: 'var(--bg-surface-hover)', borderRadius: 'var(--radius-md)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: tag.color }}></div>
+                    <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{tag.name}</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', background: 'var(--bg-background)', padding: '0.1rem 0.3rem', borderRadius: '4px' }}>Rank: {tag.weight || 0}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.25rem' }}>
+                    <button 
+                      onClick={() => setEditingTag(tag)}
+                      style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', borderRadius: 'var(--radius-sm)', background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-strong)', cursor: 'pointer' }}
+                    >
+                      Edit
+                    </button>
+                    <button 
+                      onClick={() => {
+                        if (confirm(`Delete tag "${tag.name}"? This will remove it from all papers.`)) {
+                          deleteTag(tag.id);
+                        }
+                      }}
+                      style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', borderRadius: 'var(--radius-sm)', background: 'transparent', color: '#ef4444', border: '1px solid #ef4444', cursor: 'pointer' }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {tags.length === 0 && (
+                <p style={{ fontSize: '0.9rem', color: 'var(--text-tertiary)', textAlign: 'center', padding: '2rem 0' }}>No tags created yet.</p>
+              )}
             </div>
           </div>
         </div>

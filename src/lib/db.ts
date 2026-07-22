@@ -22,6 +22,14 @@ export function getDb() {
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS tags (
+        id TEXT PRIMARY KEY,
+        name TEXT UNIQUE NOT NULL,
+        color TEXT,
+        weight INTEGER DEFAULT 0,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE TABLE IF NOT EXISTS papers (
         id TEXT,
         collectionId TEXT,
@@ -80,6 +88,12 @@ export function getDb() {
 
     try {
       db.exec(`ALTER TABLE papers ADD COLUMN publicationDate TEXT;`);
+    } catch (error) {
+      // Column likely already exists
+    }
+    
+    try {
+      db.exec(`ALTER TABLE tags ADD COLUMN weight INTEGER DEFAULT 0;`);
     } catch (error) {
       // Column likely already exists
     }

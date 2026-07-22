@@ -7,13 +7,14 @@ import { useEffect, useState } from 'react';
 import { useGraphStore } from '@/store/graphStore';
 
 export default function Home() {
-  const { fetchCollections, activeCollectionId, loadCollectionGraph, graphData } = useGraphStore();
+  const { fetchCollections, fetchTags, activeCollectionId, loadCollectionGraph, graphData } = useGraphStore();
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
     fetchCollections();
-  }, [fetchCollections]);
+    fetchTags();
+  }, [fetchCollections, fetchTags]);
 
   useEffect(() => {
     if (activeCollectionId && graphData.nodes.length === 0) {

@@ -119,7 +119,8 @@ function PaperPopup({ node, onClose, isRightPanelCollapsed }: { node: GraphNode;
   const [isSaving, setIsSaving] = useState(false);
   const [showSaved, setShowSaved] = useState(false);
   const [showCitation, setShowCitation] = useState(false);
-  const { graphData } = useGraphStore();
+  const { graphData, tags } = useGraphStore();
+  const [localTags, setLocalTags] = useState<string[]>((node as any).localTags || []);
   const [hasMovedManually, setHasMovedManually] = useState(false);
   const [pos, setPos] = useState({ x: typeof window !== 'undefined' ? Math.max(360, window.innerWidth - (isRightPanelCollapsed ? 446 : 822)) : 300, y: 80 });
   const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
@@ -127,6 +128,7 @@ function PaperPopup({ node, onClose, isRightPanelCollapsed }: { node: GraphNode;
   // Reset state when a NEW node is selected
   useEffect(() => { 
     setNotes((node as any).notes || ''); 
+    setLocalTags((node as any).localTags || []);
     setHasMovedManually(false);
     if (typeof window !== 'undefined') {
       setPos({ x: Math.max(360, window.innerWidth - (isRightPanelCollapsed ? 446 : 822)), y: 80 });
@@ -150,6 +152,30 @@ function PaperPopup({ node, onClose, isRightPanelCollapsed }: { node: GraphNode;
     return Math.max(n.citationCount || 0, loadedCount);
   };
 
+  const handleSaveTags = async (newTags: string[]) => {
+    setLocalTags(newTags);
+    const activeCollectionId = useGraphStore.getState().activeCollectionId;
+    if (!activeCollectionId) return;
+    try {
+      await fetch(`/api/collection/${node.id}?collectionId=${activeCollectionId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes, localTags: newTags })
+      });
+      const { graphData, selectedNode, setSelectedNode } = useGraphStore.getState();
+      const targetNode = graphData.nodes.find(n => n.id === node.id);
+      if (targetNode) {
+         (targetNode as any).localTags = newTags;
+      }
+      if (selectedNode?.id === node.id) {
+         const updatedSelectedNode = { ...selectedNode, localTags: newTags } as any;
+         setSelectedNode(updatedSelectedNode);
+      }
+    } catch (error) {
+      console.error('Failed to auto-save tags', error);
+    }
+  };
+
   const handleSaveNotes = async () => {
     const activeCollectionId = useGraphStore.getState().activeCollectionId;
     if (!activeCollectionId) return;
@@ -159,7 +185,7 @@ function PaperPopup({ node, onClose, isRightPanelCollapsed }: { node: GraphNode;
       await fetch(`/api/collection/${node.id}?collectionId=${activeCollectionId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notes })
+        body: JSON.stringify({ notes, localTags })
       });
       
       // Update local store in-place so we don't trigger a full graph/physics reload
@@ -167,11 +193,12 @@ function PaperPopup({ node, onClose, isRightPanelCollapsed }: { node: GraphNode;
       const targetNode = graphData.nodes.find(n => n.id === node.id);
       if (targetNode) {
          (targetNode as any).notes = notes;
+         (targetNode as any).localTags = localTags;
       }
       
       if (selectedNode?.id === node.id) {
          // Also update the selected node reference so the UI knows about the change
-         const updatedSelectedNode = { ...selectedNode, notes } as any;
+         const updatedSelectedNode = { ...selectedNode, notes, localTags } as any;
          setSelectedNode(updatedSelectedNode);
       }
       
@@ -342,6 +369,38 @@ function PaperPopup({ node, onClose, isRightPanelCollapsed }: { node: GraphNode;
           <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
             {node.abstract || 'No abstract available.'}
           </p>
+        </div>
+
+        <div>
+          <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem', color: 'var(--text-primary)' }}>Tags</h3>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            {localTags.map(tagId => {
+              const tag = tags.find(t => t.id === tagId);
+              if (!tag) return null;
+              return (
+                <div key={tag.id} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', padding: '0.2rem 0.5rem', background: tag.color + '40', border: `1px solid ${tag.color}`, borderRadius: '12px', fontSize: '0.75rem', color: 'var(--text-primary)' }}>
+                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: tag.color }} />
+                  {tag.name}
+                  <button onClick={() => handleSaveTags(localTags.filter(id => id !== tag.id))} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0 2px', fontSize: '0.8rem', lineHeight: 1 }}>&times;</button>
+                </div>
+              );
+            })}
+          </div>
+          <select 
+            onChange={e => {
+              const val = e.target.value;
+              if (val && !localTags.includes(val)) {
+                handleSaveTags([...localTags, val]);
+              }
+              e.target.value = '';
+            }}
+            style={{ padding: '0.4rem', borderRadius: 'var(--radius-sm)', background: 'var(--bg-background)', border: '1px solid var(--border-strong)', color: 'var(--text-primary)', fontSize: '0.8rem', width: '100%' }}
+          >
+            <option value="">+ Add Tag...</option>
+            {tags.filter(t => !localTags.includes(t.id)).map(tag => (
+              <option key={tag.id} value={tag.id}>{tag.name}</option>
+            ))}
+          </select>
         </div>
 
         <div>
@@ -594,12 +653,14 @@ function CompendiumNoteItem({ node }: { node: GraphNode }) {
 }
 
 function NotesCompendiumModal({ nodes, onClose }: { nodes: GraphNode[]; onClose: () => void }) {
-  const nodesWithNotes = nodes.filter(n => n.notes && n.notes.trim().length > 0);
+  const nodesWithNotes = nodes.filter(n => (n.notes && n.notes.trim().length > 0) || ((n as any).localTags && (n as any).localTags.length > 0));
+  const { tags } = useGraphStore();
 
   const downloadText = () => {
     const lines = nodesWithNotes.map(n => {
       const year = n.publicationDate ? n.publicationDate.split('-')[0] : (n.year || 'n.d.');
-      return `Title: ${n.title}\nAuthors: ${formatAuthors(n.authors)}\nYear: ${year}\nNotes:\n${n.notes}\n\n----------------------------------------\n`;
+      const tagNames = ((n as any).localTags || []).map((tid: string) => tags.find(t => t.id === tid)?.name).filter(Boolean).join(', ');
+      return `Title: ${n.title}\nAuthors: ${formatAuthors(n.authors)}\nYear: ${year}\nTags: ${tagNames}\nNotes:\n${n.notes || ''}\n\n----------------------------------------\n`;
     });
     const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -614,9 +675,10 @@ function NotesCompendiumModal({ nodes, onClose }: { nodes: GraphNode[]; onClose:
     const escapeCsv = (str: string) => `"${str.replace(/"/g, '""')}"`;
     const rows = nodesWithNotes.map(n => {
       const year = n.publicationDate ? n.publicationDate.split('-')[0] : (n.year || 'n.d.');
-      return `${escapeCsv(n.title)},${escapeCsv(formatAuthors(n.authors))},${year},${escapeCsv(n.notes || '')}`;
+      const tagNames = ((n as any).localTags || []).map((tid: string) => tags.find(t => t.id === tid)?.name).filter(Boolean).join(', ');
+      return `${escapeCsv(n.title)},${escapeCsv(formatAuthors(n.authors))},${year},${escapeCsv(tagNames)},${escapeCsv(n.notes || '')}`;
     });
-    const header = 'Title,Authors,Year,Notes\n';
+    const header = 'Title,Authors,Year,Tags,Notes\n';
     const blob = new Blob([header + rows.join('\n')], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -647,7 +709,7 @@ function NotesCompendiumModal({ nodes, onClose }: { nodes: GraphNode[]; onClose:
         </div>
         
         {nodesWithNotes.length === 0 ? (
-          <p style={{ color: 'var(--text-secondary)' }}>No notes found in this collection.</p>
+          <p style={{ color: 'var(--text-secondary)' }}>No notes or tags found in this collection.</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             {nodesWithNotes.map(n => (
@@ -661,7 +723,7 @@ function NotesCompendiumModal({ nodes, onClose }: { nodes: GraphNode[]; onClose:
 }
 
 export default function DetailPanel() {
-  const { selectedNode, setSelectedNode, activeCollectionId, graphData, relatedFilter, setRelatedFilter, collectionFilter, setCollectionFilter, edgeFilter, setEdgeFilter, focusedNodeId, newlyAddedPapers, clearNewlyAddedPapers } = useGraphStore();
+  const { selectedNode, setSelectedNode, activeCollectionId, graphData, relatedFilter, setRelatedFilter, collectionFilter, setCollectionFilter, edgeFilter, setEdgeFilter, focusedNodeId, newlyAddedPapers, clearNewlyAddedPapers, tags, tagFilter, toggleTagFilter } = useGraphStore();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [splitRatio, setSplitRatio] = useState(50);
   const [showNotesCompendium, setShowNotesCompendium] = useState(false);
@@ -738,6 +800,10 @@ export default function DetailPanel() {
 
   const allCollectionNodes = graphData.nodes.filter(n => n.status === 'seed' && (!visibleIds || visibleIds.has(n.id)));
   const collectionNodes = allCollectionNodes.filter(n => {
+    if (tagFilter.length > 0) {
+      const nodeTags = (n as any).localTags || [];
+      if (!tagFilter.every(tid => nodeTags.includes(tid))) return false;
+    }
     if (!collectionFilter) return true;
     const authorsStr = Array.isArray(n.authors) ? n.authors.join(', ') : (n.authors || '');
     return matchesSearch(collectionFilter, [n.title, authorsStr, n.abstract || '']);
@@ -746,6 +812,10 @@ export default function DetailPanel() {
   const allRelatedNodes = graphData.nodes.filter(n => n.status !== 'seed' && (!visibleIds || visibleIds.has(n.id)));
   
   const filteredRelatedNodes = allRelatedNodes.filter(n => {
+    if (tagFilter.length > 0) {
+      const nodeTags = (n as any).localTags || [];
+      if (!tagFilter.every(tid => nodeTags.includes(tid))) return false;
+    }
     if (!relatedFilter) return true;
     const authorsStr = Array.isArray(n.authors) ? n.authors.join(', ') : (n.authors || '');
     return matchesSearch(relatedFilter, [n.title, authorsStr, n.abstract || '']);
@@ -890,6 +960,38 @@ export default function DetailPanel() {
           gap: 0,
           overflow: 'hidden'
         }}>
+          {/* Tags Filter */}
+          {tags.length > 0 && (
+            <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border-subtle)', marginBottom: '1rem' }}>
+              <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Filter by Tags</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                {tags.map(tag => {
+                  const isActive = tagFilter.includes(tag.id);
+                  return (
+                    <button 
+                      key={tag.id}
+                      onClick={() => toggleTagFilter(tag.id)}
+                      style={{
+                        padding: '0.2rem 0.5rem',
+                        background: isActive ? tag.color : 'transparent',
+                        color: isActive ? '#fff' : 'var(--text-primary)',
+                        border: `1px solid ${tag.color}`,
+                        borderRadius: '12px',
+                        fontSize: '0.75rem',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        display: 'flex', alignItems: 'center', gap: '0.25rem'
+                      }}
+                    >
+                      {!isActive && <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: tag.color }} />}
+                      {tag.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Collection Section */}
           <div style={{ display: 'flex', flexDirection: 'column', height: `${splitRatio}%`, minHeight: 0 }}>
             <div ref={collectionHeaderRef} style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1rem' }}>
@@ -960,6 +1062,17 @@ export default function DetailPanel() {
                   }}
                 >
                   <h3 title={selectedNode?.id === node.id ? undefined : node.title} style={{ fontSize: '0.9rem', marginBottom: '0.25rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{node.title}</h3>
+                  {((node as any).localTags && (node as any).localTags.length > 0) && (
+                    <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                      {((node as any).localTags as string[])
+                         .map(tid => tags.find(t => t.id === tid))
+                         .filter(Boolean)
+                         .map(t => (
+                           <span key={t!.id} style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', borderRadius: '4px', background: t!.color + '40', color: 'var(--text-primary)', border: `1px solid ${t!.color}` }}>{t!.name}</span>
+                         ))
+                      }
+                    </div>
+                  )}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem' }}>
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
                       {node.year} • {getDisplayCitationCount(node)} citations
@@ -1071,6 +1184,17 @@ export default function DetailPanel() {
                     }}
                   >
                     <h3 title={selectedNode?.id === node.id ? undefined : node.title} style={{ fontSize: '0.9rem', marginBottom: '0.25rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{node.title}</h3>
+                    {((node as any).localTags && (node as any).localTags.length > 0) && (
+                      <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                        {((node as any).localTags as string[])
+                           .map(tid => tags.find(t => t.id === tid))
+                           .filter(Boolean)
+                           .map(t => (
+                             <span key={t!.id} style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', borderRadius: '4px', background: t!.color + '40', color: 'var(--text-primary)', border: `1px solid ${t!.color}` }}>{t!.name}</span>
+                           ))
+                        }
+                      </div>
+                    )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem' }}>
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
                         {node.year} • {getDisplayCitationCount(node)} citations
