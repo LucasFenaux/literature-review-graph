@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
-import { getPaperDetails } from '@/lib/openalex';
+
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);

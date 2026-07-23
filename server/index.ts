@@ -1,6 +1,12 @@
+import dotenv from 'dotenv';
+import path from 'path';
+
+// Load .env.local first (highest priority), then .env
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+
 import express from 'express';
 import cors from 'cors';
-import path from 'path';
 import { adaptNextRoute } from './adapter';
 
 import * as collectionRoute from '../src/api/collection/route';
@@ -14,6 +20,8 @@ import * as expandIdRoute from '../src/api/expand/[id]/route';
 import * as queueRoute from '../src/api/queue/route';
 import * as queueStatusRoute from '../src/api/queue/status/route';
 import * as searchRoute from '../src/api/search/route';
+import * as searchMatchRoute from '../src/api/search/match/route';
+import * as searchBatchDoisRoute from '../src/api/search/batch-dois/route';
 import * as settingsRoute from '../src/api/settings/route';
 import * as settingsBackupManualRoute from '../src/api/settings/backup/manual/route';
 import * as settingsBackupRestoreRoute from '../src/api/settings/backup/restore/route';
@@ -38,6 +46,8 @@ app.all('/api/expand/:id', (req, res) => adaptNextRoute(req, res, expandIdRoute,
 app.all('/api/queue', (req, res) => adaptNextRoute(req, res, queueRoute));
 app.all('/api/queue/status', (req, res) => adaptNextRoute(req, res, queueStatusRoute));
 app.all('/api/search', (req, res) => adaptNextRoute(req, res, searchRoute));
+app.all('/api/search/match', (req, res) => adaptNextRoute(req, res, searchMatchRoute));
+app.all('/api/search/batch-dois', (req, res) => adaptNextRoute(req, res, searchBatchDoisRoute));
 app.all('/api/settings', (req, res) => adaptNextRoute(req, res, settingsRoute));
 app.all('/api/settings/backup/manual', (req, res) => adaptNextRoute(req, res, settingsBackupManualRoute));
 app.all('/api/settings/backup/restore', (req, res) => adaptNextRoute(req, res, settingsBackupRestoreRoute));

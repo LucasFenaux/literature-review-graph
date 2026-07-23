@@ -25,16 +25,25 @@ export async function POST(request: Request) {
         let targetS2Id = paperId.startsWith('s2:') ? paperId.replace('s2:', '') : null;
 
         if (!targetS2Id) {
-          paper = await getPaperDetails(paperId);
-          if (paper && paper.title) {
-            targetS2Id = await getS2PaperByTitle(paper.title);
+          const localPaper = db.prepare('SELECT title FROM papers WHERE id = ?').get(paperId) as any;
+          let titleToSearch = localPaper?.title;
+
+          if (!titleToSearch && !process.env.SEMANTIC_SCHOLAR_API_KEY) {
+            paper = await getPaperDetails(paperId);
+            if (paper && paper.title) {
+              titleToSearch = paper.title;
+            }
+          }
+
+          if (titleToSearch) {
+            targetS2Id = await getS2PaperByTitle(titleToSearch);
           }
         }
 
         if (targetS2Id) {
           if (type === 'citations' || type === 'both') citations = await getS2Citations(targetS2Id);
           if (type === 'references' || type === 'both') references = await getS2References(targetS2Id);
-        } else {
+        } else if (!process.env.SEMANTIC_SCHOLAR_API_KEY) {
           // If we couldn't resolve S2, use OpenAlex natively
           if (type === 'citations' || type === 'both') {
             citations = await getCitations(paperId, 20); 

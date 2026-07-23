@@ -25,7 +25,7 @@ function mapS2ToPaper(s2Paper: any): Paper {
     id: `s2:${s2Paper.paperId}`,
     title: s2Paper.title || 'Untitled',
     abstract: s2Paper.abstract || '',
-    authors: (s2Paper.authors || []).map((a: any) => a.name).join(', '),
+    authors: (s2Paper.authors || []).map((a: any) => a.name),
     year: s2Paper.year || new Date().getFullYear(),
     citationCount: s2Paper.citationCount || 0,
     url: s2Paper.url || '',
@@ -36,7 +36,7 @@ function mapS2ToPaper(s2Paper: any): Paper {
   };
 }
 
-async function fetchWithBackoff(url: string, retries = 3): Promise<any> {
+async function fetchWithBackoff(url: string, retries = 4): Promise<any> {
   const db = (await import('./db')).default;
   let cacheFreshnessDays = 7;
   if (url.includes('/references?')) {
@@ -65,7 +65,7 @@ async function fetchWithBackoff(url: string, retries = 3): Promise<any> {
   try {
     const row = db.prepare('SELECT data, timestamp FROM api_cache WHERE key = ?').get(url) as any;
     if (row) {
-      const ts = new Date(row.timestamp).getTime();
+      const ts = new Date(row.timestamp + 'Z').getTime();
       if (Date.now() - ts < CACHE_TTL_MS) {
         logS2ApiCall(url, true);
         return { ok: true, json: async () => JSON.parse(row.data) };
@@ -82,7 +82,7 @@ async function fetchWithBackoff(url: string, retries = 3): Promise<any> {
     const res = await fetch(url, { headers: getHeaders() });
     if (res.status !== 429) {
       logS2ApiCall(url, false);
-      if (res.ok) {
+      if (res.ok || res.status === 404 || res.status === 400) {
         const cloned = res.clone();
         const data = await cloned.text();
         try {
@@ -97,7 +97,7 @@ async function fetchWithBackoff(url: string, retries = 3): Promise<any> {
     if (attempt >= retries) {
       throw new Error('S2_RATE_LIMIT');
     }
-    const delayMs = baseDelay * Math.pow(2, attempt) + Math.random() * 500;
+    const delayMs = Math.min(baseDelay * Math.pow(2, attempt) + Math.random() * 500, 5000);
     await new Promise(r => setTimeout(r, delayMs));
   }
   throw new Error('S2_RATE_LIMIT');
@@ -107,7 +107,10 @@ export async function searchS2Papers(query: string, limit = 10): Promise<Paper[]
   const url = `${S2_API_URL}/paper/search?query=${encodeURIComponent(query)}&limit=${limit}&fields=${S2_FIELDS},references.paperId`;
   const res = await fetchWithBackoff(url);
   
-  if (!res.ok) return [];
+  if (!res.ok) {
+    if (res.status === 429) throw new Error('Rate limit exceeded (429)');
+    throw new Error(`Semantic Scholar API Error: ${res.status}`);
+  }
   
   const data = await res.json();
   if (data && data.data) {
@@ -125,6 +128,23 @@ export async function getS2PaperByTitle(title: string): Promise<string | null> {
   const data = await res.json();
   if (data && data.data && data.data.length > 0) {
     return data.data[0].paperId;
+  }
+  return null;
+}
+
+export async function getS2PaperMatch(query: string): Promise<Paper | null> {
+  const url = `${S2_API_URL}/paper/search/match?query=${encodeURIComponent(query)}&fields=${S2_FIELDS}`;
+  const res = await fetchWithBackoff(url);
+  
+  if (!res.ok) {
+    if (res.status === 429) throw new Error('Rate limit exceeded (429)');
+    if (res.status === 400) return null; // 400 means no match found often
+    throw new Error(`Semantic Scholar API Error: ${res.status}`);
+  }
+  
+  const data = await res.json();
+  if (data && data.data && data.data.length > 0) {
+    return mapS2ToPaper(data.data[0]);
   }
   return null;
 }
@@ -157,4 +177,49 @@ export async function getS2References(paperId: string, limit = 20): Promise<Pape
     .map((d: any) => d.citedPaper)
     .filter((p: any) => p && p.paperId)
     .map(mapS2ToPaper);
+}
+
+export async function getS2PapersByDois(dois: string[]): Promise<Paper[]> {
+  if (dois.length === 0) return [];
+  
+  const results: Paper[] = [];
+  
+  // S2 batch endpoint often times out when requesting references for many papers.
+  // We use concurrent individual searches with a concurrency limit.
+  const limit = 5; 
+  let active = 0;
+  let index = 0;
+  
+  return new Promise((resolve) => {
+    const next = async () => {
+      if (index >= dois.length && active === 0) {
+        resolve(results);
+        return;
+      }
+      while (active < limit && index < dois.length) {
+        const i = index++;
+        active++;
+        const cleanDoi = dois[i].replace(/[{}]/g, '');
+        const url = `${S2_API_URL}/paper/DOI:${cleanDoi}?fields=${S2_FIELDS}`;
+        
+        fetchWithBackoff(url)
+          .then(async res => {
+            if (res.ok) {
+              const data = await res.json();
+              if (data && data.paperId) {
+                results.push(mapS2ToPaper(data));
+              }
+            }
+          })
+          .catch(e => {
+            console.error('Error fetching DOI in batch wrapper:', cleanDoi, e);
+          })
+          .finally(() => {
+            active--;
+            next();
+          });
+      }
+    };
+    next();
+  });
 }

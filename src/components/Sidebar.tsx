@@ -1,8 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useGraphStore } from '@/store/graphStore';
 import { Paper } from '@/lib/openalex';
+import bibtexParse from 'bibtex-parse-js';
+import BibtexImportModal from './BibtexImportModal';
+import BibtexTextInputModal from './BibtexTextInputModal';
 import { formatAuthors } from '@/lib/formatters';
 import SearchInput, { saveToHistory } from '@/components/SearchInput';
 
@@ -56,8 +59,16 @@ export default function Sidebar() {
     tags,
     createTag,
     updateTag,
-    deleteTag
+    deleteTag,
+    tagFilter,
+    toggleTagFilter,
+    rebuildEdges
   } = useGraphStore();
+
+  const [isImportingBibtex, setIsImportingBibtex] = useState(false);
+  const [showBibtexInput, setShowBibtexInput] = useState(false);
+  const [parsedBibtexEntries, setParsedBibtexEntries] = useState<any[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -137,6 +148,36 @@ export default function Sidebar() {
     if (id) loadCollectionGraph(id);
   };
 
+  const handleImportBibtexClick = () => {
+    if (!activeCollectionId) {
+      alert('Please select or create a collection first.');
+      return;
+    }
+    setShowBibtexInput(true);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      try {
+        const parsed = bibtexParse.toJSON(text);
+        setParsedBibtexEntries(parsed);
+        setShowBibtexInput(false);
+        setIsImportingBibtex(true);
+      } catch (err) {
+        console.error('Error parsing BibTeX', err);
+        alert('Failed to parse BibTeX file.');
+      }
+      // Reset input so the same file can be selected again
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+    reader.readAsText(file);
+  };
+
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   return (
@@ -163,23 +204,40 @@ export default function Sidebar() {
       {/* Collections Header */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderBottom: '1px solid var(--border-strong)', paddingBottom: '1rem' }}>
         <h1 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Collections</h1>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           <select 
             value={activeCollectionId || ''} 
             onChange={handleCollectionChange}
-            style={{ flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-sm)', background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border-strong)' }}
+            style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border-strong)' }}
           >
             <option value="" disabled>Select a collection...</option>
             {collections.map(c => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
-          <button 
-            onClick={handleCreateCollection}
-            style={{ padding: '0.5rem', borderRadius: 'var(--radius-sm)', background: 'var(--accent-secondary)', color: 'white', border: 'none', cursor: 'pointer' }}
-          >
-            + New
-          </button>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button 
+              onClick={handleCreateCollection}
+              style={{ flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-sm)', background: 'var(--accent-secondary)', color: 'white', border: 'none', cursor: 'pointer' }}
+              title="Create new collection"
+            >
+              + New
+            </button>
+            <button 
+              onClick={handleImportBibtexClick}
+              style={{ flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-sm)', background: 'var(--bg-surface-hover)', color: 'var(--text-primary)', border: '1px solid var(--border-strong)', cursor: 'pointer' }}
+              title="Import from .bib file"
+            >
+              Import .bib
+            </button>
+            <input 
+              type="file" 
+              accept=".bib" 
+              style={{ display: 'none' }} 
+              ref={fileInputRef} 
+              onChange={handleFileChange} 
+            />
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.5rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
@@ -798,6 +856,27 @@ export default function Sidebar() {
       >
         {isCollapsed ? '>' : '<'}
       </button>
+
+      {showBibtexInput && (
+        <BibtexTextInputModal 
+          onImport={(entries) => {
+            setParsedBibtexEntries(entries);
+            setShowBibtexInput(false);
+            setIsImportingBibtex(true);
+          }}
+          onUploadFile={() => {
+            fileInputRef.current?.click();
+          }}
+          onClose={() => setShowBibtexInput(false)}
+        />
+      )}
+
+      {isImportingBibtex && (
+        <BibtexImportModal 
+          entries={parsedBibtexEntries} 
+          onClose={() => setIsImportingBibtex(false)} 
+        />
+      )}
     </div>
   );
 }

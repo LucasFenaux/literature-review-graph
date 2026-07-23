@@ -41,7 +41,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const checkCache = (url: string, ttl: number) => {
       const row = db.prepare('SELECT timestamp FROM api_cache WHERE key = ?').get(url) as any;
       if (row) {
-        const ts = new Date(row.timestamp).getTime();
+        const ts = new Date(row.timestamp + 'Z').getTime();
         return (now - ts) < ttl;
       }
       return false;
@@ -61,7 +61,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       if (!s2Id && process.env.SEMANTIC_SCHOLAR_API_KEY) {
         const titleUrl = `${S2_API_URL}/paper/search?query=${encodeURIComponent(paper.title)}&limit=1&fields=paperId`;
         const titleRow = db.prepare('SELECT data, timestamp FROM api_cache WHERE key = ?').get(titleUrl) as any;
-        if (titleRow && (now - new Date(titleRow.timestamp).getTime() < CACHE_CITATIONS_TTL_MS)) {
+        if (titleRow && (now - new Date(titleRow.timestamp + 'Z').getTime() < CACHE_CITATIONS_TTL_MS)) {
           try {
             const data = JSON.parse(titleRow.data);
             if (data && data.data && data.data.length > 0) {
@@ -75,8 +75,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
          isCitationsFresh = checkCache(`${S2_API_URL}/paper/${s2Id}/citations?limit=20&fields=${S2_FIELDS}`, CACHE_CITATIONS_TTL_MS);
          isReferencesFresh = checkCache(`${S2_API_URL}/paper/${s2Id}/references?limit=20&fields=${S2_FIELDS}`, CACHE_REFERENCES_TTL_MS);
       } else {
-         isCitationsFresh = checkCache(`${OPENALEX_API_URL}/works?filter=cites:${paper.id}&per-page=50&sort=cited_by_count:desc`, CACHE_CITATIONS_TTL_MS);
-         isReferencesFresh = checkCache(`${OPENALEX_API_URL}/works/${paper.id}`, CACHE_REFERENCES_TTL_MS); 
+         if (process.env.SEMANTIC_SCHOLAR_API_KEY) {
+           // We enforce S2. If we couldn't get an s2Id, we at least did a title search which would be cached.
+           const titleUrl = `${S2_API_URL}/paper/search?query=${encodeURIComponent(paper.title)}&limit=1&fields=paperId`;
+           isCitationsFresh = checkCache(titleUrl, CACHE_CITATIONS_TTL_MS);
+           isReferencesFresh = isCitationsFresh;
+         } else {
+           isCitationsFresh = checkCache(`${OPENALEX_API_URL}/works?filter=cites:${paper.id}&per-page=20&sort=cited_by_count:desc`, CACHE_CITATIONS_TTL_MS);
+           isReferencesFresh = checkCache(`${OPENALEX_API_URL}/works/${paper.id}`, CACHE_REFERENCES_TTL_MS); 
+         }
       }
 
       if (isCitationsFresh) citationsFresh++;

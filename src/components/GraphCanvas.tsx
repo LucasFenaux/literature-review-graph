@@ -266,7 +266,7 @@ export default function GraphCanvas() {
         // Adjust charge to prevent too much overlap and push nodes apart
         const chargeForce = fgRef.current.d3Force('charge');
         if (chargeForce) {
-          chargeForce.strength(-800); // Massive repelling force to spread the graph wide
+          chargeForce.strength(-1500); // Massive repelling force to spread the graph wide
         }
         
         // Add tensile strength to edges so connected nodes stay tightly bound despite the strong repulsion
@@ -278,12 +278,16 @@ export default function GraphCanvas() {
             const sourceObj = nodeMap.get(sourceId);
             const targetObj = nodeMap.get(targetId);
             
+            const r1 = sourceObj ? 20 * getNodeSizeFactor(sourceObj) : 20;
+            const r2 = targetObj ? 20 * getNodeSizeFactor(targetObj) : 20;
+            const minDistance = r1 + r2 + 30; // 30px padding between the edges of the nodes
+            
             const isSourceCollection = sourceObj?.status === 'seed' || sourceObj?.status === 'collection';
             const isTargetCollection = targetObj?.status === 'seed' || targetObj?.status === 'collection';
             
-            if (isSourceCollection && isTargetCollection) return 20; // Tier 1: Very tight
-            if (isSourceCollection || isTargetCollection) return 40; // Tier 2: Medium
-            return 80; // Tier 3: Loose
+            if (isSourceCollection && isTargetCollection) return Math.max(minDistance, 40); // Tier 1: Very tight
+            if (isSourceCollection || isTargetCollection) return Math.max(minDistance, 80); // Tier 2: Medium
+            return Math.max(minDistance, 120); // Tier 3: Loose
           });
           
           linkForce.strength((link: any) => {
@@ -300,6 +304,8 @@ export default function GraphCanvas() {
             return 0.1; // Tier 3: Weakest pull
           });
         }
+        
+        // Revert back to strict fx locking, no forceX used
         
         // Add a collision force so nodes don't overlap
         fgRef.current.d3Force('collide', forceCollide().radius((n: any) => {
@@ -504,7 +510,6 @@ export default function GraphCanvas() {
            node.fx = node.targetX;
            
            const isCore = node.status === 'seed' || node.status === 'collection';
-           
            if (isCore) {
                // Permanently fix Y for core nodes
                node.fy = node.y;

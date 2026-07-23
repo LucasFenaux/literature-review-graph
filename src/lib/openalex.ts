@@ -100,9 +100,11 @@ async function fetchWithCache(url: string): Promise<any> {
   try {
     const row = db.prepare('SELECT data, timestamp FROM api_cache WHERE key = ?').get(url) as any;
     if (row) {
-      const ts = new Date(row.timestamp).getTime();
+      const ts = new Date(row.timestamp + 'Z').getTime();
       if (Date.now() - ts < CACHE_TTL_MS) {
-        return JSON.parse(row.data);
+        const parsed = JSON.parse(row.data);
+        if (parsed.error === 404) return null;
+        return parsed;
       }
     }
   } catch (e) {
@@ -112,7 +114,12 @@ async function fetchWithCache(url: string): Promise<any> {
   // Fetch
   const response = await fetch(url);
   if (!response.ok) {
-    if (response.status === 404) return null;
+    if (response.status === 404) {
+      try {
+        db.prepare('INSERT OR REPLACE INTO api_cache (key, data, timestamp) VALUES (?, ?, CURRENT_TIMESTAMP)').run(url, JSON.stringify({error: 404}));
+      } catch (e) {}
+      return null;
+    }
     throw new Error('Failed to fetch from OpenAlex');
   }
   

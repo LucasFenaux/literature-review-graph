@@ -30,10 +30,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     
     // Prioritize Semantic Scholar if API key exists and we have an OpenAlex ID
     if (!targetS2Id && process.env.SEMANTIC_SCHOLAR_API_KEY) {
-      if (!paper) paper = await getPaperDetails(id);
-      if (paper && paper.title) {
+      const localPaper = db.prepare('SELECT title FROM papers WHERE id = ?').get(id) as any;
+      let titleToSearch = localPaper?.title;
+
+      if (titleToSearch) {
         try {
-          targetS2Id = await getS2PaperByTitle(paper.title);
+          targetS2Id = await getS2PaperByTitle(titleToSearch);
         } catch (e: any) {
           if (e.message === 'S2_RATE_LIMIT') queueRetry(id, type);
         }
@@ -57,7 +59,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
     
     // If we didn't use S2 (no ID found or no key), or S2 failed but we didn't throw, try OpenAlex natively
-    if (!usedS2) {
+    if (!usedS2 && !process.env.SEMANTIC_SCHOLAR_API_KEY) {
       if (type === 'citations' || type === 'both') {
         citations = await getCitations(id, 20); 
       }
@@ -72,10 +74,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       
       // Semantic Scholar Fallback Logic (if OpenAlex returned nothing and we didn't already try S2)
       if ((type === 'citations' || type === 'both') && citations.length === 0 && !targetS2Id) {
-        if (!paper) paper = await getPaperDetails(id);
-        if (paper && paper.title) {
+        const localPaper = db.prepare('SELECT title FROM papers WHERE id = ?').get(id) as any;
+        let titleToSearch = localPaper?.title;
+        if (!titleToSearch) {
+          if (!paper) paper = await getPaperDetails(id);
+          if (paper && paper.title) titleToSearch = paper.title;
+        }
+
+        if (titleToSearch) {
           try {
-            const fallbackS2Id = await getS2PaperByTitle(paper.title);
+            const fallbackS2Id = await getS2PaperByTitle(titleToSearch);
             if (fallbackS2Id) citations = await getS2Citations(fallbackS2Id);
           } catch (e: any) {
             if (e.message === 'S2_RATE_LIMIT') queueRetry(id, 'citations');
@@ -84,10 +92,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       }
 
       if ((type === 'references' || type === 'both') && references.length === 0 && !targetS2Id) {
-        if (!paper) paper = await getPaperDetails(id);
-        if (paper && paper.title) {
+        const localPaper = db.prepare('SELECT title FROM papers WHERE id = ?').get(id) as any;
+        let titleToSearch = localPaper?.title;
+        if (!titleToSearch) {
+          if (!paper) paper = await getPaperDetails(id);
+          if (paper && paper.title) titleToSearch = paper.title;
+        }
+
+        if (titleToSearch) {
           try {
-            const fallbackS2Id = await getS2PaperByTitle(paper.title);
+            const fallbackS2Id = await getS2PaperByTitle(titleToSearch);
             if (fallbackS2Id) references = await getS2References(fallbackS2Id);
           } catch (e: any) {
             if (e.message === 'S2_RATE_LIMIT') queueRetry(id, 'references');

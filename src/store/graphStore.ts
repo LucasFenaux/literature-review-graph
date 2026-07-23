@@ -49,6 +49,7 @@ interface GraphState {
   focusedNodeId: string | null;
   bulkLoading: { type: string; current: number; total: number } | null;
   newlyAddedPapers: string[] | null;
+  clearedNewPapers: string[];
   tags: Tag[];
   tagFilter: string[];
   
@@ -114,11 +115,12 @@ export const useGraphStore = create<GraphState>()(
       focusedNodeId: null,
       bulkLoading: null,
       newlyAddedPapers: null,
+      clearedNewPapers: [],
       tags: [],
       tagFilter: [],
       
       setCollections: (collections) => set({ collections }),
-      setActiveCollectionId: (id) => set({ activeCollectionId: id, selectedNode: null, focusedNodeId: null }),
+      setActiveCollectionId: (id) => set({ activeCollectionId: id, selectedNode: null, focusedNodeId: null, clearedNewPapers: [], newlyAddedPapers: null }),
       setExploreMode: (mode) => set({ exploreMode: mode }),
       setSearchQuery: (query) => set({ searchQuery: query }),
       setRelatedFilter: (query) => set({ relatedFilter: query }),
@@ -128,7 +130,10 @@ export const useGraphStore = create<GraphState>()(
       setGraphData: (data) => set({ graphData: data }),
       setSelectedNode: (node) => set({ selectedNode: node }),
       setFocusedNodeId: (id) => set({ focusedNodeId: id }),
-      clearNewlyAddedPapers: () => set({ newlyAddedPapers: null }),
+      clearNewlyAddedPapers: () => set((state) => ({ 
+        clearedNewPapers: [...state.clearedNewPapers, ...(state.newlyAddedPapers || [])],
+        newlyAddedPapers: null 
+      })),
       setTags: (tags) => set({ tags }),
       setTagFilter: (filter) => set({ tagFilter: filter }),
       toggleTagFilter: (tagId) => set((state) => ({
@@ -270,7 +275,7 @@ export const useGraphStore = create<GraphState>()(
       
       const nodes = calculateSizes(papers, links);
       
-      set({ graphData: { nodes, links }, activeCollectionId: collectionId, edgeFilter: 1 });
+      set({ graphData: { nodes, links }, activeCollectionId: collectionId, edgeFilter: 1, clearedNewPapers: [], newlyAddedPapers: null });
     } catch (err) {
       console.error('Failed to load collection graph', err);
     }
@@ -427,7 +432,7 @@ export const useGraphStore = create<GraphState>()(
       await expandNode(nodesToExpand[i], type);
       
       const currentNodes = get().graphData.nodes;
-      const currentNew = currentNodes.map(n => n.id).filter(id => !initialNodes.has(id));
+      const currentNew = currentNodes.map(n => n.id).filter(id => !initialNodes.has(id) && !get().clearedNewPapers.includes(id));
       const combinedNew = Array.from(new Set([...existingNewlyAdded, ...currentNew]));
 
       if (combinedNew.length > newlyAdded.length) {
